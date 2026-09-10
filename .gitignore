@@ -1,0 +1,13 @@
+.DS_Store
+DerivedData/
+.build/
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+
+# Downloaded or compiled model artifacts belong outside source control.
+ModelAssets/*
+!ModelAssets/.gitignore
+!ModelAssets/README.md
+!ModelAssets/manifest.json
+
