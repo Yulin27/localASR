@@ -52,9 +52,11 @@ The repository is an architecture scaffold, not yet a functioning application. T
 
 ## Near-term sequence
 
+Follow the detailed phases and exit gates in `docs/IMPLEMENTATION_PLAN.md`.
+
+0. Run the standalone model feasibility gate; do not couple it to application code.
 1. Add core values, narrow ports, and coordinator state-machine tests.
 2. Create the signed menu-bar app and composition root.
 3. Build a microphone-to-mock-transcript-to-copy vertical slice.
 4. Benchmark ASR candidates on real Chinese, English, French, and mixed audio.
 5. Add deterministic processing, insertion fallbacks, local refinement, modes, history, and permission onboarding in that order.
-
