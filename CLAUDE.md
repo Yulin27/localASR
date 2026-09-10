@@ -1,3 +1,7 @@
+<!-- Generated from AGENTS.md by Scripts/sync_claude_md.py. Do not edit. -->
+<!-- Claude Code reads CLAUDE.md; AGENTS.md stays the source of truth. -->
+<!-- After editing AGENTS.md, rerun: python3 Scripts/sync_claude_md.py -->
+
 # LocalASR Agent Guide
 
 This file defines repository-wide rules. More specific `AGENTS.md` files exist under the application, package modules, tests, model assets, scripts, and documentation. Read every guide from the repository root down to the directory you are changing; the nearest guide adds local detail.
