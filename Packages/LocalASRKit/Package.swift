@@ -25,41 +25,41 @@ let package = Package(
     targets: [
         .target(
             name: "DictationCore",
-            exclude: ["AGENTS.md"]
+            exclude: ["AGENTS.md", "CLAUDE.md"]
         ),
         .target(
             name: "Observability",
-            exclude: ["AGENTS.md"]
+            exclude: ["AGENTS.md", "CLAUDE.md"]
         ),
         .target(
             name: "AudioCapture",
             dependencies: ["DictationCore", "Observability"],
-            exclude: ["AGENTS.md"]
+            exclude: ["AGENTS.md", "CLAUDE.md"]
         ),
         .target(
             name: "ModelManagement",
             dependencies: ["DictationCore", "Observability"],
-            exclude: ["AGENTS.md"]
+            exclude: ["AGENTS.md", "CLAUDE.md"]
         ),
         .target(
             name: "SpeechEngines",
             dependencies: ["DictationCore", "ModelManagement", "Observability"],
-            exclude: ["AGENTS.md"]
+            exclude: ["AGENTS.md", "CLAUDE.md"]
         ),
         .target(
             name: "TextProcessing",
             dependencies: ["DictationCore", "ModelManagement", "Observability"],
-            exclude: ["AGENTS.md"]
+            exclude: ["AGENTS.md", "CLAUDE.md"]
         ),
         .target(
             name: "MacIntegration",
             dependencies: ["DictationCore", "Observability"],
-            exclude: ["AGENTS.md"]
+            exclude: ["AGENTS.md", "CLAUDE.md"]
         ),
         .target(
             name: "Persistence",
             dependencies: ["DictationCore", "Observability"],
-            exclude: ["AGENTS.md"]
+            exclude: ["AGENTS.md", "CLAUDE.md"]
         ),
         .testTarget(
             name: "ArchitectureTests",
