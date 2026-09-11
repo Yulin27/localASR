@@ -391,7 +391,6 @@ public actor DictationCoordinator {
                 TextProcessingRequest(
                     sessionID: context.id,
                     rawText: rawText,
-                    language: context.languageHint,
                     mode: context.mode
                 )
             )
@@ -414,8 +413,7 @@ public actor DictationCoordinator {
         let request = RefinementRequest(
             sessionID: context.id,
             text: normalizedText,
-            mode: context.mode,
-            language: context.languageHint
+            mode: context.mode
         )
 
         do {

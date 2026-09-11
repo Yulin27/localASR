@@ -107,8 +107,7 @@ struct RefinementGuardTests {
             for: RefinementRequest(
                 sessionID: SessionID(),
                 text: input,
-                mode: .structured,
-                language: .chinese
+                mode: .structured
             )
         )
         #expect(verdict == .rejected(.refinementLengthOutOfRange))
@@ -121,12 +120,7 @@ struct RefinementGuardTests {
     ) -> RefinementGuardVerdict {
         guardRail.evaluate(
             RefinementOutput(text: output, engine: engine),
-            for: RefinementRequest(
-                sessionID: SessionID(),
-                text: input,
-                mode: mode,
-                language: .automatic
-            )
+            for: RefinementRequest(sessionID: SessionID(), text: input, mode: mode)
         )
     }
 }

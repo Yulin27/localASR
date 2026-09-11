@@ -9,13 +9,11 @@ public struct RefinementRequest: Sendable {
     public let text: String
 
     public let mode: RefinementMode
-    public let language: LanguageHint
 
-    public init(sessionID: SessionID, text: String, mode: RefinementMode, language: LanguageHint) {
+    public init(sessionID: SessionID, text: String, mode: RefinementMode) {
         self.sessionID = sessionID
         self.text = text
         self.mode = mode
-        self.language = language
     }
 }
 

@@ -128,7 +128,6 @@ actor FakeSpeechRecognizer: SpeechRecognizing {
     var response: FakeResponse<RecognitionResult> = .value(
         RecognitionResult(
             rawText: "raw text",
-            language: .english,
             engine: EngineIdentifier(name: "fake-asr", version: "1")
         )
     )

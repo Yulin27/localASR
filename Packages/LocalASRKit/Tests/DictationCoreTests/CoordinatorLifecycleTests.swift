@@ -151,7 +151,7 @@ struct CoordinatorLifecycleTests {
     func contextIsFrozenAtStart() async throws {
         let harness = DictationHarness(
             settings: DictationSettings(
-                languageHint: .mixed,
+                languageHint: .chinese,
                 defaultMode: .note,
                 refinementEnabled: true
             ),
@@ -161,8 +161,11 @@ struct CoordinatorLifecycleTests {
 
         let terminal = try await harness.runSession()
         let context = try #require(terminal.context)
+        let recognition = await harness.recognizer.requests
 
-        #expect(context.languageHint == .mixed)
+        #expect(context.languageHint == .chinese)
+        // Recognition is the one stage that receives the hint.
+        #expect(recognition.map(\.language) == [.chinese])
         #expect(context.mode == .structured)
         #expect(context.application?.bundleIdentifier == "com.example.editor")
         #expect(context.insertionTarget?.elementToken == "focused-field")
@@ -182,10 +185,13 @@ struct CoordinatorLifecycleTests {
 
         await harness.coordinator.handle(.toggleRecording)
         let terminal = try await harness.waitForTerminal()
+        let recognition = await harness.recognizer.requests
 
         #expect(terminal.context == started)
         #expect(terminal.context?.languageHint == started.languageHint)
         #expect(terminal.context?.mode == started.mode)
+        // Recognition runs after the change, and still receives the hint frozen at start.
+        #expect(recognition.map(\.language) == [started.languageHint])
     }
 
     @Test("A destination that could not be captured still records and completes")

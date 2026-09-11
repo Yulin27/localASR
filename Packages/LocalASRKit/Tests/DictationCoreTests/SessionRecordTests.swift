@@ -15,7 +15,7 @@ struct SessionRecordTests {
             sessionID: sessionID,
             startedAt: Date(timeIntervalSince1970: 1_700_000_000),
             sourceBundleIdentifier: "com.example.editor",
-            languageHint: .mixed,
+            languageHint: .french,
             mode: .message,
             transcript: Transcript(rawText: "raw", normalizedText: "norm", finalText: "final"),
             recognitionEngine: EngineIdentifier(name: "asr", version: "0.6b", revision: "abc123"),
@@ -33,7 +33,7 @@ struct SessionRecordTests {
         #expect(record.transcript.normalizedText == "norm")
         #expect(record.transcript.finalText == "final")
         #expect(record.mode == .message)
-        #expect(record.languageHint == .mixed)
+        #expect(record.languageHint == .french)
         #expect(record.recognitionEngine?.revision == "abc123")
         #expect(record.refinementEngine?.revision == "def456")
         #expect(record.fallbackReasons == [.refinementTimedOut])
