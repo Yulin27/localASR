@@ -62,6 +62,10 @@ let package = Package(
             exclude: ["AGENTS.md", "CLAUDE.md"]
         ),
         .testTarget(
+            name: "DictationCoreTests",
+            dependencies: ["DictationCore"]
+        ),
+        .testTarget(
             name: "ArchitectureTests",
             dependencies: [
                 "DictationCore",
