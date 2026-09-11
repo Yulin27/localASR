@@ -358,4 +358,113 @@ struct CoordinatorFallbackTests {
         #expect(recovered.transcript.finalText == "refined text")
         #expect(harness.metrics.all.map(\.outcome) == [.failed, .completed])
     }
+
+    // MARK: - Adapter failures that must not end the session
+
+    @Test("A detector failure the adapter mapped to a domain failure is still non-fatal")
+    func mappedDetectorFailureIsNonFatal() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+        // The port asks adapters to map their failures, so this is what a well-behaved
+        // detector throws when its model is not loaded.
+        await harness.voiceActivity.setResponse(
+            .failure(
+                DictationFailure(
+                    stage: Self.transcribingStage,
+                    category: .modelUnavailable,
+                    recoverability: .recoverable
+                )
+            )
+        )
+
+        let terminal = try await harness.runSession()
+        let requests = await harness.recognizer.requests
+
+        #expect(terminal.phase == .completed)
+        #expect(terminal.fallbacks == [.voiceActivityUnavailable])
+        #expect(requests.first?.speechSegment == nil)
+    }
+
+    // An adapter can throw `CancellationError` while the session itself is not cancelled, for
+    // example a refiner that enforces its own deadline by cancelling a child task. Only the
+    // session's cancellation ends the session; anything else takes the stage's fallback.
+
+    @Test("A detector's own CancellationError falls back to the untrimmed clip")
+    func detectorCancellationErrorFallsBack() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+        await harness.voiceActivity.setResponse(.cancelled)
+
+        let terminal = try await harness.runSession()
+        let requests = await harness.recognizer.requests
+
+        #expect(terminal.phase == .completed)
+        #expect(terminal.fallbacks == [.voiceActivityUnavailable])
+        #expect(requests.first?.speechSegment == nil)
+    }
+
+    @Test("A deterministic stage's own CancellationError falls back to the raw text")
+    func deterministicCancellationErrorFallsBack() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+        await harness.processor.setResponse(.cancelled)
+
+        let terminal = try await harness.runSession()
+
+        #expect(terminal.phase == .completed)
+        #expect(terminal.transcript.normalizedText == "raw text")
+        #expect(terminal.fallbacks == [.deterministicProcessingUnavailable])
+    }
+
+    @Test("A refiner's own CancellationError falls back to the deterministic text")
+    func refinerCancellationErrorFallsBack() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+        await harness.refiner.setResponse(.cancelled)
+
+        let terminal = try await harness.runSession()
+        let inserted = await harness.inserter.requests
+
+        #expect(terminal.phase == .completed)
+        #expect(terminal.transcript.finalText == "normalized text")
+        #expect(inserted.map(\.text) == ["normalized text"])
+        #expect(terminal.fallbacks.count == 1)
+    }
+
+    // MARK: - Empty text
+
+    @Test(
+        "A dictation with no text left is failed rather than inserted",
+        arguments: [" \n", "um uh"], [true, false]
+    )
+    func emptyTextIsNeverInserted(rawText: String, refinementEnabled: Bool) async throws {
+        let harness = DictationHarness(
+            settings: DictationSettings(
+                languageHint: .automatic,
+                defaultMode: .note,
+                refinementEnabled: refinementEnabled
+            )
+        )
+        await harness.allowAll()
+        await harness.recognizer.setResponse(
+            .value(RecognitionResult(rawText: rawText, engine: EngineIdentifier(name: "fake-asr")))
+        )
+        // Blank recognition, or filler-only speech that filler removal empties.
+        await harness.processor.setResponse(.value(NormalizedText(text: "")))
+        // A refiner given nothing tends to invent something, and it is not the user's words.
+        await harness.refiner.setResponse(
+            .value(
+                RefinementOutput(
+                    text: "Thank you for watching.",
+                    engine: EngineIdentifier(name: "fake-refiner")
+                )
+            )
+        )
+
+        let terminal = try await harness.runSession()
+
+        #expect(terminal.phase == .failed)
+        #expect(terminal.failure?.category == .emptyTranscript)
+        #expect(await harness.inserter.callCount == 0)
+    }
 }

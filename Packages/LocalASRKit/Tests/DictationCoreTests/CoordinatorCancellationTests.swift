@@ -29,7 +29,6 @@ struct CoordinatorCancellationTests {
         let events = await harness.capture.events
         let discards = await harness.clip.discardCount
         let metrics = harness.metrics.all
-        let records = await harness.history.records
 
         #expect(terminal.phase == .cancelled)
         #expect(metrics.count == 1)
@@ -37,11 +36,15 @@ struct CoordinatorCancellationTests {
 
         if boundary == .insertion {
             // The text had already been handed to the inserter, so history keeps it: the
-            // session was cancelled, but the text may well be in the user's document.
-            #expect(records.count == 1)
+            // session was cancelled, but the text may well be in the user's document. The
+            // record is written after the terminal snapshot, so wait for it instead of reading
+            // once. The fake store honours cancellation, as a real one would.
+            try await harness.waitUntil("history recorded the cancelled session") {
+                await harness.history.records.count == 1
+            }
             #expect(terminal.insertion != nil)
         } else {
-            #expect(records.isEmpty)
+            #expect(await harness.history.records.isEmpty)
         }
 
         if boundary.isAfterCaptureStop {
@@ -53,6 +56,12 @@ struct CoordinatorCancellationTests {
             #expect(events.count(where: { $0 == .cancel }) == 1)
             #expect(events.count(where: { $0 == .stop }) == 0)
             #expect(discards == 0)
+        }
+
+        if boundary.isBeforeCaptureStart {
+            // Cancelled before the device was asked to start, so it must never start. A
+            // microphone that turns on after the user cancelled is a privacy failure.
+            #expect(!events.contains(.start), "capture events were \(events)")
         }
     }
 
@@ -123,5 +132,79 @@ struct CoordinatorCancellationTests {
 
         #expect(snapshot.phase == .completed)
         #expect(events.count(where: { $0 == .cancel }) == 0)
+    }
+
+    @Test(
+        "An adapter that fails with its own error after a cancellation still ends cancelled",
+        arguments: [
+            DictationHarness.Boundary.capturePrepare, .captureStart, .captureStop, .recognition,
+        ]
+    )
+    func adapterErrorAfterCancellationEndsCancelled(
+        _ boundary: DictationHarness.Boundary
+    ) async throws {
+        let harness = DictationHarness()
+        await harness.parkOnly(boundary)
+        defer { Task { await harness.releaseAll() } }
+
+        // An adapter interrupted by a cancellation often reports it as an error of its own
+        // rather than `CancellationError`. The user still cancelled; nothing failed.
+        switch boundary {
+        case .capturePrepare: await harness.capture.setPrepareResponse(.unmappedFailure)
+        case .captureStart: await harness.capture.setStartResponse(.unmappedFailure)
+        case .captureStop: await harness.capture.setStopResponse(.unmappedFailure)
+        case .recognition: await harness.recognizer.setResponse(.unmappedFailure)
+        default: Issue.record("No failing response is configured for \(boundary.rawValue)")
+        }
+
+        await harness.coordinator.handle(.toggleRecording)
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("the session parked at \(boundary.rawValue)") {
+            await harness.hasArrived(at: boundary)
+        }
+
+        await harness.coordinator.handle(.cancel)
+        await harness.releaseAll()
+        let terminal = try await harness.waitForTerminal()
+
+        #expect(terminal.phase == .cancelled)
+        #expect(terminal.failure == nil)
+        #expect(harness.metrics.last?.outcome == .cancelled)
+    }
+
+    @Test("Cancelling does not wait for an adapter that ignores the cancellation")
+    func cancelDoesNotWaitForAnUncooperativeAdapter() async throws {
+        let harness = DictationHarness(ignoringCancellationAt: [.recognition])
+        await harness.parkOnly(.recognition)
+        defer { Task { await harness.releaseAll() } }
+
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("recognition was entered") {
+            await harness.recognizer.callCount == 1
+        }
+        let abandoned = await harness.currentSnapshot().sessionID
+
+        // The recognizer stays parked through the cancellation, like a long model call that
+        // never checks for it. The user should not have to wait for that call to return.
+        await harness.coordinator.handle(.cancel)
+        let cancelled = try await harness.waitForPhase(.cancelled)
+        #expect(cancelled.sessionID == abandoned)
+
+        try await harness.startRecording()
+        let next = await harness.currentSnapshot()
+        #expect(next.sessionID != abandoned)
+
+        // When the abandoned call finally returns, it must not disturb the new session.
+        await harness.releaseAll()
+        try await harness.waitUntil("the abandoned session released its clip") {
+            await harness.clip.discardCount == 1
+        }
+        let afterRelease = await harness.currentSnapshot()
+        #expect(afterRelease.phase == .recording)
+        #expect(afterRelease.sessionID == next.sessionID)
+
+        await harness.coordinator.handle(.cancel)
+        #expect(try await harness.waitForTerminal().phase == .cancelled)
     }
 }

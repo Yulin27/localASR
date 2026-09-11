@@ -11,7 +11,9 @@ enum FakeResponse<Value: Sendable>: Sendable {
     case value(Value)
     /// Throws a typed domain failure, as a well-behaved adapter would.
     case failure(DictationFailure)
-    /// Throws `CancellationError`, as an adapter that honours cancellation would.
+    /// Throws `CancellationError`. In a cancelled session this is an adapter honouring the
+    /// cancellation; in a live one it is an adapter whose own internal cancellation escaped,
+    /// such as a refiner enforcing a deadline on a child task.
     case cancelled
     /// Throws an error that was never mapped to a domain failure.
     case unmappedFailure

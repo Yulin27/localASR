@@ -318,8 +318,11 @@ actor FakeHistoryStore: HistoryStoring {
         writeError = error
     }
 
+    /// Honours cancellation, as a store doing file or database I/O would. A store that ignored
+    /// it would hide a record written from a cancelled task and silently dropped.
     func record(_ record: SessionRecord) async throws {
         await latch?.arriveAndWait()
+        try Task.checkCancellation()
         if let writeError { throw writeError }
         records.append(record)
     }

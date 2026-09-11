@@ -276,4 +276,109 @@ struct CoordinatorLifecycleTests {
         #expect(metrics.finalCharacterCount == "refined text".count)
         #expect(textBearing.isEmpty)
     }
+
+    // MARK: - Destination, published state, and shutdown
+
+    @Test(
+        "A destination that could not be captured still resolves the application's mode",
+        arguments: [TargetUnavailableReason.accessibilityPermissionDenied, .noFocusedElement]
+    )
+    func unavailableDestinationStillResolvesTheApplicationMode(
+        _ reason: TargetUnavailableReason
+    ) async throws {
+        let harness = DictationHarness(
+            target: .unavailable(
+                reason,
+                application: ActiveApplication(
+                    processIdentifier: 501,
+                    bundleIdentifier: "com.tinyspeck.slackmacgap"
+                )
+            ),
+            modeBindings: ["com.tinyspeck.slackmacgap": .message]
+        )
+        await harness.allowAll()
+
+        let terminal = try await harness.runSession()
+        let refinements = await harness.refiner.requests
+
+        // Reading the frontmost application needs no permission, and per-app modes are keyed
+        // on it rather than on the focused element.
+        #expect(terminal.context?.mode == .message)
+        #expect(refinements.map(\.mode) == [.message])
+    }
+
+    @Test("Observers hear about a session only once its destination is frozen")
+    func sessionIsPublishedWithItsFrozenContext() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+
+        let stream = await harness.coordinator.snapshots()
+        let collector = Task { () -> [SessionSnapshot] in
+            var snapshots: [SessionSnapshot] = []
+            for await snapshot in stream {
+                snapshots.append(snapshot)
+            }
+            return snapshots
+        }
+
+        _ = try await harness.runSession()
+        await harness.coordinator.shutdown()
+        let published = await collector.value
+
+        // A HUD that reacts to a session starting can move focus. Every snapshot of a session
+        // must already carry the destination that was captured before that could happen.
+        let withoutContext = published.filter { $0.phase != .idle && $0.context == nil }
+        #expect(
+            withoutContext.isEmpty,
+            "published before the context was frozen: \(withoutContext.map(\.phase))"
+        )
+    }
+
+    @Test("The deterministic text is published before refinement and survives a cancel there")
+    func deterministicTextIsPublishedBeforeRefinement() async throws {
+        let harness = DictationHarness()
+        await harness.parkOnly(.refinement)
+        defer { Task { await harness.releaseAll() } }
+        // Once the cancellation releases it, the refiner honours it and throws. A refiner that
+        // returned a result instead would carry the deterministic text into the transcript.
+        await harness.refiner.setResponse(.cancelled)
+
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        let refining = try await harness.waitForPhase(.refining)
+
+        // Refinement can take seconds. Anything shown or copied meanwhile should be the
+        // deterministic text, not raw recognition output.
+        #expect(refining.transcript.normalizedText == "normalized text")
+        #expect(refining.transcript.bestAvailableText == "normalized text")
+
+        await harness.coordinator.handle(.cancel)
+        await harness.releaseAll()
+        let terminal = try await harness.waitForTerminal()
+
+        #expect(terminal.phase == .cancelled)
+        #expect(terminal.transcript.rawText == "raw text")
+        #expect(terminal.transcript.normalizedText == "normalized text")
+    }
+
+    @Test("A coordinator that was shut down ignores further activations")
+    func shutDownCoordinatorIgnoresActivations() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+        await harness.coordinator.shutdown()
+
+        // A shortcut event can still arrive while the application is terminating.
+        await harness.coordinator.handle(.toggleRecording)
+        let snapshot = await harness.currentSnapshot()
+        let microphoneStarted = await harness.eventually {
+            await harness.capture.events.contains(.start)
+        }
+
+        #expect(snapshot.phase == .idle)
+        #expect(!microphoneStarted, "the microphone started after shutdown")
+        #expect(await harness.targetProvider.callCount == 0)
+
+        // Ends a session that should never have started, so it is not left parked.
+        await harness.coordinator.handle(.cancel)
+    }
 }

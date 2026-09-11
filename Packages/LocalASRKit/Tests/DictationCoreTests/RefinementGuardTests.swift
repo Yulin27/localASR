@@ -113,6 +113,67 @@ struct RefinementGuardTests {
         #expect(verdict == .rejected(.refinementLengthOutOfRange))
     }
 
+    @Test(
+        "A dictation that opens like a preamble is not rejected as one",
+        arguments: [
+            ("sure let's meet at five tomorrow", "Sure, let's meet at five tomorrow."),
+            ("of course I can send it tonight", "Of course, I can send it tonight."),
+            ("certainly it works for me", "Certainly, it works for me."),
+            ("voici le document que tu m'as demandé hier", "Voici le document que tu m'as demandé hier."),
+            ("bien sûr je peux venir demain", "Bien sûr, je peux venir demain."),
+            ("这是你要的资料请查收", "这是你要的资料，请查收。"),
+            ("下面是我们下周的安排先确认范围再排期", "下面是我们下周的安排：先确认范围，再排期。"),
+        ]
+    )
+    func dictatedOpenerIsNotPreamble(input: String, output: String) {
+        // The speaker said these words. Punctuating them is the refinement, not a preamble.
+        #expect(evaluate(output, input: input, mode: .message) == .accepted(output))
+    }
+
+    @Test("A preamble written with a typographic apostrophe is still rejected")
+    func typographicApostrophePreambleIsRejected() {
+        let body = "把消息发出去，记得告诉他我们下周再确认细节。"
+        #expect(
+            evaluate("Here’s the cleaned version: " + body, input: body, mode: .message)
+                == .rejected(.refinementPreamble)
+        )
+    }
+
+    @Test(
+        "Email mode may frame a short dictation with a greeting and sign-off",
+        arguments: [
+            ("明天请假", "您好，\n\n我明天需要请假一天。\n\n谢谢！"),
+            ("running late", "Hi,\n\nI'm running about ten minutes late.\n\nThanks!"),
+        ]
+    )
+    func shortDictationMayGainEmailFraming(input: String, output: String) {
+        // A fixed greeting and sign-off dwarf a short input, so a pure ratio cannot tell this
+        // apart from a runaway output.
+        #expect(evaluate(output, input: input, mode: .email) == .accepted(output))
+    }
+
+    @Test("Translating away the Latin terms of a mixed dictation is rejected")
+    func lostLatinInMixedDictationIsRejected() {
+        let input = "我们用 Kubernetes 和 PostgreSQL 部署这个服务吧"
+        #expect(
+            evaluate("我们用容器编排平台和数据库部署这个服务吧。", input: input)
+                == .rejected(.refinementLanguageDamage)
+        )
+
+        // Keeping the terms is faithful, with or without mixed-script spacing.
+        let spaced = "我们用 Kubernetes 和 PostgreSQL 部署这个服务吧。"
+        let unspaced = "我们用Kubernetes和PostgreSQL部署这个服务吧。"
+        #expect(evaluate(spaced, input: input) == .accepted(spaced))
+        #expect(evaluate(unspaced, input: input) == .accepted(unspaced))
+    }
+
+    @Test("Output for an input with no text is never accepted")
+    func outputForEmptyInputIsNotAccepted() {
+        let hallucination = "Thank you for watching."
+        #expect(evaluate(hallucination, input: "") != .accepted(hallucination))
+        #expect(evaluate(hallucination, input: " \n") != .accepted(hallucination))
+    }
+
     private func evaluate(
         _ output: String,
         input: String,
