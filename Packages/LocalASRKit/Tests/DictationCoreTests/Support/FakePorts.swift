@@ -268,10 +268,10 @@ struct FakeModeResolver: ModeResolving {
     var modes: [String: RefinementMode] = [:]
 
     func resolveMode(
-        for target: InsertionTarget?,
+        for application: ActiveApplication?,
         default defaultMode: RefinementMode
     ) -> RefinementMode {
-        guard let bundleID = target?.application.bundleIdentifier,
+        guard let bundleID = application?.bundleIdentifier,
               let mode = modes[bundleID]
         else {
             return defaultMode

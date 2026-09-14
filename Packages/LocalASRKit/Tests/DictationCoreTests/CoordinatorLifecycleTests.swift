@@ -307,7 +307,7 @@ struct CoordinatorLifecycleTests {
         #expect(refinements.map(\.mode) == [.message])
     }
 
-    @Test("Snapshots carry the same frozen context after preparation")
+    @Test("Every published snapshot of a session carries the same frozen context")
     func contextRemainsFrozenAfterPreparation() async throws {
         let harness = DictationHarness()
         await harness.allowAll()
@@ -325,13 +325,51 @@ struct CoordinatorLifecycleTests {
         await harness.coordinator.shutdown()
         let published = await collector.value
 
-        // `preparing` is published before asynchronous target capture completes. Every later
-        // phase must carry the same context, regardless of subsequent focus or settings changes.
-        let afterPreparation = published.filter {
-            $0.phase != .idle && $0.phase != .preparing
+        // Nothing is published until the destination is frozen, so `preparing` is included:
+        // every snapshot a view can act on carries the context, and it is the same one
+        // throughout, regardless of subsequent focus or settings changes.
+        let session = published.filter { $0.phase != .idle }
+        let frozenContext = try #require(session.first?.context)
+        #expect(session.first?.phase == .preparing)
+        #expect(session.allSatisfy { $0.context == frozenContext })
+    }
+
+    @Test("Nothing is published for a session until its destination is frozen")
+    func nothingIsPublishedBeforeTheDestinationIsFrozen() async throws {
+        let harness = DictationHarness()
+        // Parked inside target capture, which is where a session sits before it has a
+        // destination to freeze.
+        await harness.parkOnly(.targetCapture)
+
+        let stream = await harness.coordinator.snapshots()
+        let collector = Task { () -> [SessionSnapshot] in
+            var snapshots: [SessionSnapshot] = []
+            for await snapshot in stream {
+                snapshots.append(snapshot)
+            }
+            return snapshots
         }
-        let frozenContext = try #require(afterPreparation.first?.context)
-        #expect(afterPreparation.allSatisfy { $0.context == frozenContext })
+
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("the session parked at target capture") {
+            await harness.targetProvider.callCount > 0
+        }
+
+        // A view told about `preparing` here would open a panel and take the focus the
+        // session is about to freeze, so it is told nothing at all yet.
+        let published = await harness.currentSnapshot()
+        #expect(published.phase == .preparing)
+
+        await harness.releaseAll()
+        _ = try await harness.waitForPhase(.recording)
+        await harness.coordinator.shutdown()
+
+        let observed = await collector.value
+        let preparing = observed.filter { $0.phase == .preparing }
+        #expect(observed.first?.phase == .idle)
+        // Published once, and only with the destination already captured.
+        #expect(preparing.count == 1)
+        #expect(preparing.first?.context?.insertionTarget?.elementToken == "focused-field")
     }
 
     @Test("The deterministic text is published before refinement and survives a cancel there")

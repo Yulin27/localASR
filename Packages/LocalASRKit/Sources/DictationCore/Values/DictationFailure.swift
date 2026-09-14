@@ -87,4 +87,8 @@ public enum FallbackReason: String, Sendable, Equatable, Codable, CaseIterable {
     case refinementContaminated
     /// The output opens with assistant preamble such as "here is the cleaned version".
     case refinementPreamble
+    /// The session's history entry could not be written. The dictation itself still
+    /// delivered, so this never fails a session — but a store that is failing every write
+    /// loses the user's history, and that must be visible rather than silent.
+    case historyUnavailable
 }

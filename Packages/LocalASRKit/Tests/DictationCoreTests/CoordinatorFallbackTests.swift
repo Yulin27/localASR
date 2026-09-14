@@ -312,6 +312,32 @@ struct CoordinatorFallbackTests {
         #expect(harness.metrics.last?.outcome == .completed)
     }
 
+    @Test("A history write that fails is reported as a degradation rather than swallowed")
+    func historyFailureIsReported() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+        await harness.history.setWriteError(UnmappedProviderError())
+
+        let terminal = try await harness.runSession()
+
+        // A store failing every write — a full disk, a failed migration — would otherwise
+        // lose all history with nothing to show for it.
+        #expect(terminal.fallbacks.contains(.historyUnavailable))
+        #expect(harness.metrics.last?.fallbacks.contains(.historyUnavailable) == true)
+        #expect(await harness.history.records.isEmpty)
+    }
+
+    @Test("A history write that succeeds reports no degradation")
+    func successfulHistoryWriteReportsNothing() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+
+        let terminal = try await harness.runSession()
+
+        #expect(!terminal.fallbacks.contains(.historyUnavailable))
+        #expect(harness.metrics.last?.fallbacks.contains(.historyUnavailable) == false)
+    }
+
     @Test("Every session records metrics exactly once, cancelled ones included")
     func metricsAreRecordedOncePerSession() async throws {
         let harness = DictationHarness()
@@ -321,6 +347,7 @@ struct CoordinatorFallbackTests {
         try await harness.startRecording()
         await harness.coordinator.handle(.cancel)
         _ = try await harness.waitForTerminal()
+        try await harness.waitForCleanup(sessions: 2)
 
         #expect(harness.metrics.all.map(\.outcome) == [.completed, .cancelled])
     }

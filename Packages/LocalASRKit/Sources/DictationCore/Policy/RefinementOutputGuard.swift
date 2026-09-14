@@ -12,9 +12,24 @@ public struct RefinementGuardPolicy: Sendable, Equatable {
         /// The largest acceptable output/input character ratio.
         public let maximumRatio: Double
 
-        public init(minimumRatio: Double, maximumRatio: Double) {
+        /// Characters a mode may add on top of the ratio, whatever the input length.
+        ///
+        /// Some framing does not scale with the dictation: an email's greeting and sign-off
+        /// are the same length whether the user dictated four characters or four hundred, so
+        /// a pure ratio rejects every short dictation in those modes. The ceiling is
+        /// therefore `max(maximumRatio × input, input + fixedAllowance)`, which still catches
+        /// a runaway output because that grows with the input it ran away from.
+        public let fixedAllowance: Int
+
+        public init(minimumRatio: Double, maximumRatio: Double, fixedAllowance: Int = 48) {
             self.minimumRatio = minimumRatio
             self.maximumRatio = maximumRatio
+            self.fixedAllowance = fixedAllowance
+        }
+
+        /// The largest output this mode accepts for an input of `inputLength` characters.
+        func ceiling(forInputOf inputLength: Int) -> Double {
+            max(Double(inputLength) * maximumRatio, Double(inputLength + fixedAllowance))
         }
     }
 
@@ -34,6 +49,11 @@ public struct RefinementGuardPolicy: Sendable, Equatable {
 
     /// v0.1 limits. Deliberately wide: the guard exists to catch a runaway or empty output,
     /// not to second-guess a rewrite. Anything tighter belongs in a measured ADR.
+    ///
+    /// The 48-character allowance is the room a greeting line and a sign-off need — "Hi,"
+    /// through "Best regards," and a name — which is what a short dictation gains in email
+    /// mode without gaining a single new fact. It is far below any runaway: an output 48
+    /// characters longer than its input is a sentence, not a model that started writing.
     public static let v0_1 = RefinementGuardPolicy(perMode: [
         .note: Limits(minimumRatio: 0.3, maximumRatio: 3.0),
         .message: Limits(minimumRatio: 0.3, maximumRatio: 3.0),
@@ -83,16 +103,24 @@ public struct RefinementOutputGuard: Sendable {
             return .rejected(.refinementContaminated)
         }
 
-        if Self.hasAssistantPreamble(text) {
+        if Self.hasAssistantPreamble(text, input: input) {
             return .rejected(.refinementPreamble)
         }
 
+        if input.isEmpty {
+            // Nothing was dictated, so whatever came back is invention rather than a rewrite —
+            // a model handed an empty transcript tends to produce a plausible sentence of its
+            // own. The coordinator fails an empty transcript before refinement; this is the
+            // second line of defence, and there is no ratio that could express it.
+            return .rejected(.refinementLengthOutOfRange)
+        }
+
         let limits = policy.limits(for: request.mode)
-        if !input.isEmpty {
-            let ratio = Double(text.count) / Double(input.count)
-            if ratio < limits.minimumRatio || ratio > limits.maximumRatio {
-                return .rejected(.refinementLengthOutOfRange)
-            }
+        let length = Double(text.count)
+        if length < Double(input.count) * limits.minimumRatio
+            || length > limits.ceiling(forInputOf: input.count)
+        {
+            return .rejected(.refinementLengthOutOfRange)
         }
 
         if Self.damagedLanguage(input: input, output: text) {
@@ -128,28 +156,81 @@ public struct RefinementOutputGuard: Sendable {
         "voici", "voici le", "bien sûr",
     ]
 
-    static func hasAssistantPreamble(_ text: String) -> Bool {
-        let head = text.prefix(40).lowercased()
-        return preamblePhrases.contains { head.hasPrefix($0) }
+    private static let normalizedPreamblePhrases = preamblePhrases.map(normalizedOpening)
+
+    /// Whether the output opens with assistant framing the speaker did not dictate.
+    ///
+    /// The phrase alone is not evidence. People open dictated messages with "sure", "voici"
+    /// and "这是你" all the time, and punctuating such an opening is the refinement working,
+    /// not a preamble — so a phrase counts only when the input did not already start with it.
+    static func hasAssistantPreamble(_ text: String, input: String) -> Bool {
+        let head = normalizedOpening(text)
+        guard let phrase = normalizedPreamblePhrases.first(where: { opensWith(head, $0) }) else {
+            return false
+        }
+        return !opensWith(normalizedOpening(input), phrase)
     }
 
-    /// Whether the output lost the script the input was written in.
+    /// The opening of `text`, lowercased, with typographic apostrophes straightened and
+    /// punctuation reduced to single spaces.
+    ///
+    /// Comparing normalized openings is what lets "sure let's meet" match the refinement
+    /// "Sure, let's meet.", and what keeps a preamble written "Here’s" from slipping past the
+    /// straight-apostrophe spelling.
+    static func normalizedOpening(_ text: String) -> String {
+        var result = ""
+        var pendingSpace = false
+        for scalar in text.prefix(60).replacingOccurrences(of: "\u{2019}", with: "'").unicodeScalars {
+            let separates =
+                CharacterSet.whitespacesAndNewlines.contains(scalar)
+                || (CharacterSet.punctuationCharacters.contains(scalar) && scalar != "'")
+            if separates {
+                pendingSpace = !result.isEmpty
+                continue
+            }
+            if pendingSpace {
+                result.unicodeScalars.append(" ")
+                pendingSpace = false
+            }
+            result.unicodeScalars.append(scalar)
+        }
+        return result.lowercased()
+    }
+
+    /// Whether a normalized opening starts with `phrase`, on a word boundary where the script
+    /// has one. Without the boundary "sure" would also match "surely"; scripts written without
+    /// spaces have no boundary to check.
+    private static func opensWith(_ head: String, _ phrase: String) -> Bool {
+        guard !phrase.isEmpty, head.hasPrefix(phrase) else { return false }
+        guard let last = phrase.unicodeScalars.last,
+              let next = head.unicodeScalars.dropFirst(phrase.unicodeScalars.count).first
+        else { return true }
+        return !(isLatinLetter(last) && isLatinLetter(next))
+    }
+
+    /// Whether the output lost a script the input was written in.
+    ///
+    /// Every script the input has enough of is checked, not only the dominant one. Mixed
+    /// Han/Latin dictation is the plurality of the corpus (ADR 0004), and a refiner that
+    /// translates "我们用 Kubernetes 部署" into pure Chinese keeps every ideograph while
+    /// destroying the technical terms — a loss the dominant script alone cannot see.
     ///
     /// Deliberately conservative. A false positive costs the user the refinement and falls
     /// back to deterministic text, so this fires only on a large loss, not on a modest shift:
-    /// an input with at least eight ideographs must retain a third of them.
+    /// a script the input used at least eight times must keep a third of it.
     static func damagedLanguage(input: String, output: String) -> Bool {
-        let inputIdeographs = ideographCount(input)
-        if inputIdeographs >= 8 {
-            return ideographCount(output) * 3 < inputIdeographs
-        }
+        lostMostOf(ideographCount, input: input, output: output)
+            || lostMostOf(latinLetterCount, input: input, output: output)
+    }
 
-        let inputLatin = latinLetterCount(input)
-        if inputLatin >= 8 {
-            return latinLetterCount(output) * 3 < inputLatin
-        }
-
-        return false
+    private static func lostMostOf(
+        _ count: (String) -> Int,
+        input: String,
+        output: String
+    ) -> Bool {
+        let before = count(input)
+        guard before >= 8 else { return false }
+        return count(output) * 3 < before
     }
 
     static func ideographCount(_ text: String) -> Int {
@@ -161,9 +242,11 @@ public struct RefinementOutputGuard: Sendable {
     }
 
     static func latinLetterCount(_ text: String) -> Int {
-        text.unicodeScalars.count { scalar in
-            scalar.properties.isAlphabetic
-                && (0x0041...0x024F).contains(scalar.value)  // basic latin through latin extended-B
-        }
+        text.unicodeScalars.count(where: isLatinLetter)
+    }
+
+    static func isLatinLetter(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.properties.isAlphabetic
+            && (0x0041...0x024F).contains(scalar.value)  // basic latin through latin extended-B
     }
 }

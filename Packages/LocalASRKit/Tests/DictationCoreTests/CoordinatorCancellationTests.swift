@@ -25,6 +25,9 @@ struct CoordinatorCancellationTests {
         await harness.coordinator.handle(.cancel)
         await harness.releaseAll()
         let terminal = try await harness.waitForTerminal()
+        // `.cancelled` is published as soon as the user asks for it, so the run behind it is
+        // still unwinding out of the adapter that was parked.
+        try await harness.waitForCleanup()
 
         let events = await harness.capture.events
         let discards = await harness.clip.discardCount
@@ -73,6 +76,7 @@ struct CoordinatorCancellationTests {
         await harness.coordinator.handle(.cancel)
         await harness.releaseAll()
         let terminal = try await harness.waitForTerminal()
+        try await harness.waitForCleanup()
 
         let events = await harness.capture.events
         #expect(terminal.phase == .cancelled)
@@ -87,6 +91,7 @@ struct CoordinatorCancellationTests {
 
         await harness.coordinator.handle(.cancel)
         let terminal = try await harness.waitForTerminal()
+        try await harness.waitForCleanup()
 
         let events = await harness.capture.events
         let discards = await harness.clip.discardCount
@@ -103,6 +108,7 @@ struct CoordinatorCancellationTests {
 
         await harness.coordinator.handle(.cancel)
         let terminal = try await harness.waitForTerminal()
+        try await harness.waitForCleanup()
         await harness.coordinator.handle(.cancel)
 
         let events = await harness.capture.events
@@ -113,6 +119,61 @@ struct CoordinatorCancellationTests {
         #expect(repeated.phase == .cancelled)
         #expect(events.count(where: { $0 == .cancel }) == 1)
         #expect(metrics.count == 1)
+    }
+
+    @Test("Cancelling is answered at once even while an adapter is still working")
+    func cancelDoesNotWaitForABusyAdapter() async throws {
+        let harness = DictationHarness()
+        // Still parked: this adapter does not check for cancellation, which is what a long
+        // recognition call on a long recording behaves like.
+        await harness.parkOnly(.recognition)
+        defer { Task { await harness.releaseAll() } }
+
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("recognition was entered") {
+            await harness.recognizer.callCount == 1
+        }
+
+        await harness.coordinator.handle(.cancel)
+
+        // Answered without waiting for the adapter to return, which could be tens of seconds.
+        let cancelled = await harness.currentSnapshot()
+        #expect(cancelled.phase == .cancelled)
+
+        // And the user can dictate again immediately, rather than having the activation
+        // ignored because the coordinator still thinks it is transcribing.
+        try await harness.startRecording()
+        let restarted = await harness.currentSnapshot()
+        #expect(restarted.phase == .recording)
+        #expect(restarted.sessionID != cancelled.sessionID)
+
+        await harness.coordinator.handle(.toggleRecording)
+        #expect(try await harness.waitForTerminal().phase == .completed)
+    }
+
+    @Test("A cancellation keeps the text the session had already produced")
+    func cancelKeepsTheTextAlreadyProduced() async throws {
+        let harness = DictationHarness()
+        await harness.parkOnly(.insertion)
+        defer { Task { await harness.releaseAll() } }
+
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("insertion was entered") {
+            await harness.inserter.callCount == 1
+        }
+
+        await harness.coordinator.handle(.cancel)
+        let cancelled = await harness.currentSnapshot()
+
+        // The terminal snapshot is where the user still sees their words. Publishing a bare
+        // `.cancelled` would throw away a finished dictation.
+        #expect(cancelled.phase == .cancelled)
+        #expect(cancelled.transcript.rawText == "raw text")
+        #expect(cancelled.transcript.normalizedText == "normalized text")
+        #expect(cancelled.transcript.finalText == "refined text")
+        #expect(cancelled.context != nil)
     }
 
     @Test("Cancelling from a finished session does nothing")
@@ -161,6 +222,7 @@ struct CoordinatorCancellationTests {
         await harness.coordinator.handle(.cancel)
         await harness.releaseAll()
         let terminal = try await harness.waitForTerminal()
+        try await harness.waitForCleanup()
 
         #expect(terminal.phase == .cancelled)
         #expect(terminal.failure == nil)

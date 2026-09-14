@@ -28,21 +28,17 @@ struct ModeResolutionTests {
 
     @Test("A destination without a bundle identifier falls back to the default")
     func destinationWithoutBundleIDFallsBack() {
-        let target = InsertionTarget(
-            application: ActiveApplication(processIdentifier: 42, bundleIdentifier: nil)
-        )
-        #expect(resolver.resolveMode(for: target, default: .email) == .email)
+        let application = ActiveApplication(processIdentifier: 42, bundleIdentifier: nil)
+        #expect(resolver.resolveMode(for: application, default: .email) == .email)
     }
 
     @Test("Resolution is pure and stable across repeated calls")
     func resolutionIsStable() {
-        let target = InsertionTarget(
-            application: ActiveApplication(
-                processIdentifier: 7,
-                bundleIdentifier: "com.tinyspeck.slackmacgap"
-            )
+        let application = ActiveApplication(
+            processIdentifier: 7,
+            bundleIdentifier: "com.tinyspeck.slackmacgap"
         )
-        let results = (0..<5).map { _ in resolver.resolveMode(for: target, default: .note) }
+        let results = (0..<5).map { _ in resolver.resolveMode(for: application, default: .note) }
         #expect(Set(results) == [.message])
     }
 
@@ -57,9 +53,7 @@ struct ModeResolutionTests {
         bundleID: String,
         with resolver: BundleIDModeResolver? = nil
     ) -> RefinementMode {
-        let target = InsertionTarget(
-            application: ActiveApplication(processIdentifier: 1, bundleIdentifier: bundleID)
-        )
-        return (resolver ?? self.resolver).resolveMode(for: target, default: .structured)
+        let application = ActiveApplication(processIdentifier: 1, bundleIdentifier: bundleID)
+        return (resolver ?? self.resolver).resolveMode(for: application, default: .structured)
     }
 }

@@ -14,6 +14,10 @@ The product motivation for a set is real. Chinese, English, French, and code-swi
 first-class, and a plausible interaction is "tell the app which languages you speak so it stops
 considering the rest." A Phase 0 probe tested whether the pinned runtime can honour that.
 
+Paths below of the form `Scripts/phase0/…` and `Sources/Phase0ASR/…` belong to the standalone
+Phase 0 feasibility harness. It is sequenced before this work but lands on its own branch, so those
+files are not part of the Phase 1 package.
+
 **What the probe measured.** Qwen3-ASR 0.6B 8-bit MLX (`aufklarer/Qwen3-ASR-0.6B-MLX-8bit`,
 revision `0bfa1071…`) through the pinned native runtime (`ca4daaf9…`) on Apple M4, macOS 15.5:
 six clips of Chinese, English, and Chinese/English mixed dictation, one corpus pass, one warm

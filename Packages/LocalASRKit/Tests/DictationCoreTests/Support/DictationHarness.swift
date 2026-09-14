@@ -184,6 +184,20 @@ final class DictationHarness: Sendable {
         throw HarnessError.timedOut(.completed)
     }
 
+    /// Waits until `sessions` runs have finished unwinding.
+    ///
+    /// A terminal snapshot no longer proves the run behind it is done. Cancellation is
+    /// answered immediately — `.cancelled` is published while the driver is still inside an
+    /// adapter call that ignored it — so releasing the device, discarding the clip, and
+    /// writing history all happen after the test can see `.cancelled`. Metrics are recorded
+    /// once per session, at the very end of that cleanup, which makes counting them the
+    /// signal that it has actually run.
+    func waitForCleanup(sessions: Int = 1) async throws {
+        try await waitUntil("\(sessions) session(s) finished unwinding") {
+            metrics.all.count >= sessions
+        }
+    }
+
     /// Spins until `condition` holds. Same bounded-and-loud contract as ``waitForPhase(_:)``.
     func waitUntil(
         _ description: String,

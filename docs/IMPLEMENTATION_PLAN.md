@@ -195,8 +195,10 @@ every invalid/error path preserves deterministic text.
 - Implement the four built-in modes: note, message, email, and structured.
 - Resolve the mode from the source bundle ID captured at recording start.
 - Keep mode definitions, instructions, and validation thresholds as typed data.
-- Add Chinese, English, French, and automatic/mixed language controls without a
-  user-facing model picker.
+- Add Chinese, English, French, and automatic language controls without a user-facing
+  model picker. There is no mixed setting: the hint is a single prior passed only to
+  recognition, and deterministic processing derives script from the text itself
+  (ADR 0004).
 
 ### Exit gate
 

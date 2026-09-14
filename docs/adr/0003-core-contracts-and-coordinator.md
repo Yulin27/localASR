@@ -55,6 +55,36 @@ has already been superseded. Allowing in-process release alone was rejected beca
 would then depend on the pipeline reaching its end, which is exactly what a cancellation
 prevents.
 
+### 4. A cancellation is answered immediately, not when the adapter returns
+
+`cancel` publishes `.cancelled` and releases the session in the same turn the user asks for it.
+Cancelling the task does not stop an adapter that never checks for cancellation, and a recognition
+call on a long recording can take tens of seconds to return. Waiting for it would leave the user
+watching `transcribing`, with the next activation landing in the ignored processing branch and no
+way to start dictating again.
+
+The abandoned run keeps only its cleanup. It no longer owns the published state, so it releases the
+device, discards the clip, writes any history the session earned, and records its metrics without
+publishing anything. This is why a run tracks its own phase separately from the published snapshot:
+the snapshot is a projection for the UI, and after a cancellation the two legitimately disagree.
+
+A consequence worth stating plainly: a terminal snapshot no longer proves the run behind it has
+finished unwinding. Metrics are recorded once, at the end of that cleanup, and are the signal that
+it has.
+
+### 5. The mode is resolved from the frontmost application, not from the destination
+
+`ModeResolving` takes the `ActiveApplication` frozen at recording start, not the `InsertionTarget`.
+`Spec.md` keys per-application modes on the frontmost bundle identifier, and reading which
+application is frontmost needs no Accessibility permission, while resolving a focused element does.
+Taking the destination would silently fall back to the default for every session whose focused
+element could not be resolved — exactly the sessions where the permission is not yet granted, or
+the destination is a password field, which are the ones a per-application rule is most needed for.
+
+For the same reason nothing is published until the context is frozen. `ARCHITECTURE.md` requires
+the destination to be captured before any overlay or asynchronous work can change focus, and the
+first snapshot a view can react to therefore already carries it.
+
 ## Consequences
 
 - Long dictation holds one clip and one transcript at a time; nothing accumulates across sessions.
@@ -63,6 +93,10 @@ prevents.
 - A history record is written whenever text reached insertion, not only when the session
   completed. Text handed to the inserter may be in the user's document even if the session was
   cancelled while that happened, and the history entry is then the only remaining record of it.
+  It is written from a context that does not inherit the session's cancellation, because a store
+  doing file or database I/O would otherwise refuse the write that matters most.
+- A lost history write never fails a dictation that already delivered, but it is reported as a
+  `FallbackReason` on the snapshot and in metrics. A store failing every write must be visible.
 - Phase 3 may add a warm/idle refresh policy on top of `AudioCapturing.prepare()` without
   changing the port, and the AUHAL decision expected in that phase does not affect these
   contracts.

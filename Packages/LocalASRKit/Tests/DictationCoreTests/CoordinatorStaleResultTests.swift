@@ -23,6 +23,7 @@ struct CoordinatorStaleResultTests {
         await harness.releaseAll()
 
         let terminal = try await harness.waitForTerminal()
+        try await harness.waitForCleanup()
         let processed = await harness.processor.callCount
         let refined = await harness.refiner.callCount
         let inserted = await harness.inserter.callCount
@@ -54,6 +55,9 @@ struct CoordinatorStaleResultTests {
         await harness.coordinator.handle(.cancel)
         await harness.releaseAll()
         let cancelled = try await harness.waitForTerminal()
+        // Waited out here so the two sessions' metrics are recorded in a defined order; the
+        // coordinator does not otherwise order an abandoned run against the next session.
+        try await harness.waitForCleanup()
         #expect(cancelled.phase == .cancelled)
 
         // The next session runs normally, and owns the published state.
@@ -89,6 +93,7 @@ struct CoordinatorStaleResultTests {
         await harness.coordinator.handle(.cancel)
         await harness.releaseAll()
         let terminal = try await harness.waitForTerminal()
+        try await harness.waitForCleanup()
 
         let discards = await harness.clip.discardCount
         let inserted = await harness.inserter.callCount

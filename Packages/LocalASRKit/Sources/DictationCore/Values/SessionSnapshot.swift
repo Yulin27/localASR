@@ -94,13 +94,18 @@ public struct InsertionOutcome: Sendable, Equatable {
 /// rendering a snapshot can never extend a recording's lifetime or leak PCM across an
 /// isolation boundary.
 public struct SessionSnapshot: Sendable, Equatable {
-    /// Present from the first snapshot of a session, which is published before the
-    /// destination and preferences have been captured.
+    /// Present from the first snapshot of a session.
     public let sessionID: SessionID?
 
     public let phase: DictationPhase
 
-    /// The frozen context. `nil` only during `preparing`, before capture completes.
+    /// The frozen context.
+    ///
+    /// Present from the first snapshot of a session onwards: the coordinator publishes
+    /// nothing until the destination, preferences, and mode have been captured, so a view
+    /// that reacts to `preparing` cannot move the focus the session is about to use. It is
+    /// `nil` only on `.idle`, and on the terminal snapshot of a session that failed or was
+    /// cancelled before the capture finished.
     public let context: SessionContext?
 
     public let audio: AudioClipMetadata?
@@ -134,6 +139,25 @@ public struct SessionSnapshot: Sendable, Equatable {
     }
 
     public static let idle = SessionSnapshot(phase: .idle)
+
+    /// Returns a copy in `phase`, keeping everything the session has produced so far.
+    ///
+    /// Internal, not public: only the coordinator advances a session's phase. It exists for
+    /// the cancellation the coordinator answers immediately, where the terminal snapshot must
+    /// still carry the deterministic text the session had already produced.
+    func moved(to phase: DictationPhase) -> SessionSnapshot {
+        SessionSnapshot(
+            phase: phase,
+            sessionID: sessionID,
+            context: context,
+            audio: audio,
+            transcript: transcript,
+            refinement: refinement,
+            insertion: insertion,
+            failure: failure,
+            fallbacks: fallbacks
+        )
+    }
 
     /// Returns a copy with one fallback appended, keeping the first occurrence's position.
     public func appending(fallback: FallbackReason) -> SessionSnapshot {

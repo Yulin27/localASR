@@ -47,6 +47,14 @@ def fail(message: str) -> "NoReturn":  # type: ignore[valid-type]
     raise SystemExit(1)
 
 
+def display_path(path: Path) -> Path:
+    """Return a repo-relative path when possible, otherwise its absolute path."""
+    try:
+        return path.relative_to(REPO_ROOT)
+    except ValueError:
+        return path
+
+
 def require_tool(name: str) -> str:
     path = shutil.which(name)
     if path is None:
@@ -182,7 +190,9 @@ def main() -> int:
     args = parser.parse_args()
 
     source: Path = args.source.expanduser()
-    out: Path = args.out.expanduser()
+    # Resolved, so a relative `--out` is still an absolute path by the time the manifest is
+    # written and reported.
+    out: Path = args.out.expanduser().resolve()
 
     db_path = source / "typeless.db"
     recordings_dir = source / "Recordings"
@@ -275,8 +285,8 @@ def main() -> int:
     )
 
     print(json.dumps(manifest["summary"], indent=2, ensure_ascii=False))
-    print(f"wrote manifest: {manifest_path.relative_to(REPO_ROOT)}")
-    print(f"wrote audio:    {audio_out.relative_to(REPO_ROOT)}/")
+    print(f"wrote manifest: {display_path(manifest_path)}")
+    print(f"wrote audio:    {display_path(audio_out)}/")
     return 0
 
 
