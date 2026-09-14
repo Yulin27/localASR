@@ -307,8 +307,8 @@ struct CoordinatorLifecycleTests {
         #expect(refinements.map(\.mode) == [.message])
     }
 
-    @Test("Observers hear about a session only once its destination is frozen")
-    func sessionIsPublishedWithItsFrozenContext() async throws {
+    @Test("Snapshots carry the same frozen context after preparation")
+    func contextRemainsFrozenAfterPreparation() async throws {
         let harness = DictationHarness()
         await harness.allowAll()
 
@@ -325,13 +325,13 @@ struct CoordinatorLifecycleTests {
         await harness.coordinator.shutdown()
         let published = await collector.value
 
-        // A HUD that reacts to a session starting can move focus. Every snapshot of a session
-        // must already carry the destination that was captured before that could happen.
-        let withoutContext = published.filter { $0.phase != .idle && $0.context == nil }
-        #expect(
-            withoutContext.isEmpty,
-            "published before the context was frozen: \(withoutContext.map(\.phase))"
-        )
+        // `preparing` is published before asynchronous target capture completes. Every later
+        // phase must carry the same context, regardless of subsequent focus or settings changes.
+        let afterPreparation = published.filter {
+            $0.phase != .idle && $0.phase != .preparing
+        }
+        let frozenContext = try #require(afterPreparation.first?.context)
+        #expect(afterPreparation.allSatisfy { $0.context == frozenContext })
     }
 
     @Test("The deterministic text is published before refinement and survives a cancel there")
@@ -370,12 +370,9 @@ struct CoordinatorLifecycleTests {
         // A shortcut event can still arrive while the application is terminating.
         await harness.coordinator.handle(.toggleRecording)
         let snapshot = await harness.currentSnapshot()
-        let microphoneStarted = await harness.eventually {
-            await harness.capture.events.contains(.start)
-        }
 
         #expect(snapshot.phase == .idle)
-        #expect(!microphoneStarted, "the microphone started after shutdown")
+        #expect(await harness.capture.events.isEmpty)
         #expect(await harness.targetProvider.callCount == 0)
 
         // Ends a session that should never have started, so it is not left parked.

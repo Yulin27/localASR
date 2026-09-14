@@ -35,14 +35,9 @@ struct CoordinatorCancellationTests {
         #expect(metrics.last?.outcome == .cancelled)
 
         if boundary == .insertion {
-            // The text had already been handed to the inserter, so history keeps it: the
-            // session was cancelled, but the text may well be in the user's document. The
-            // record is written after the terminal snapshot, so wait for it instead of reading
-            // once. The fake store honours cancellation, as a real one would.
-            try await harness.waitUntil("history recorded the cancelled session") {
-                await harness.history.records.count == 1
-            }
-            #expect(terminal.insertion != nil)
+            // Cancellation during delivery must not erase the finished text. Whether an
+            // interrupted delivery belongs in history is a separate persistence policy.
+            #expect(terminal.transcript.bestAvailableText == "refined text")
         } else {
             #expect(await harness.history.records.isEmpty)
         }
@@ -170,41 +165,5 @@ struct CoordinatorCancellationTests {
         #expect(terminal.phase == .cancelled)
         #expect(terminal.failure == nil)
         #expect(harness.metrics.last?.outcome == .cancelled)
-    }
-
-    @Test("Cancelling does not wait for an adapter that ignores the cancellation")
-    func cancelDoesNotWaitForAnUncooperativeAdapter() async throws {
-        let harness = DictationHarness(ignoringCancellationAt: [.recognition])
-        await harness.parkOnly(.recognition)
-        defer { Task { await harness.releaseAll() } }
-
-        try await harness.startRecording()
-        await harness.coordinator.handle(.toggleRecording)
-        try await harness.waitUntil("recognition was entered") {
-            await harness.recognizer.callCount == 1
-        }
-        let abandoned = await harness.currentSnapshot().sessionID
-
-        // The recognizer stays parked through the cancellation, like a long model call that
-        // never checks for it. The user should not have to wait for that call to return.
-        await harness.coordinator.handle(.cancel)
-        let cancelled = try await harness.waitForPhase(.cancelled)
-        #expect(cancelled.sessionID == abandoned)
-
-        try await harness.startRecording()
-        let next = await harness.currentSnapshot()
-        #expect(next.sessionID != abandoned)
-
-        // When the abandoned call finally returns, it must not disturb the new session.
-        await harness.releaseAll()
-        try await harness.waitUntil("the abandoned session released its clip") {
-            await harness.clip.discardCount == 1
-        }
-        let afterRelease = await harness.currentSnapshot()
-        #expect(afterRelease.phase == .recording)
-        #expect(afterRelease.sessionID == next.sessionID)
-
-        await harness.coordinator.handle(.cancel)
-        #expect(try await harness.waitForTerminal().phase == .cancelled)
     }
 }

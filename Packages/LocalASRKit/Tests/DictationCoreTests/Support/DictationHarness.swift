@@ -56,20 +56,14 @@ final class DictationHarness: Sendable {
 
     private let latches: [Boundary: Latch]
 
-    /// `ignoringCancellationAt` lists the boundaries whose port call keeps running when the
-    /// session is cancelled, the way an adapter that never checks for cancellation does. A
-    /// session parked at one of them stays parked until ``releaseAll()``.
     init(
         settings: DictationSettings = .standard,
         target: TargetCaptureResult? = nil,
         modeBindings: [String: RefinementMode] = [:],
-        refinementGuard: RefinementOutputGuard = RefinementOutputGuard(),
-        ignoringCancellationAt uncooperative: Set<Boundary> = []
+        refinementGuard: RefinementOutputGuard = RefinementOutputGuard()
     ) {
         let latches = Dictionary(
-            uniqueKeysWithValues: Boundary.allCases.map {
-                ($0, Latch(opensOnCancel: !uncooperative.contains($0)))
-            }
+            uniqueKeysWithValues: Boundary.allCases.map { ($0, Latch()) }
         )
         self.latches = latches
 
@@ -201,18 +195,6 @@ final class DictationHarness: Sendable {
             await Task.yield()
         }
         throw HarnessError.conditionNeverHeld(description)
-    }
-
-    /// Spins a bounded number of times and reports whether `condition` ever held.
-    ///
-    /// For asserting that something does not happen. A correct coordinator spends the whole
-    /// budget; a broken one satisfies the condition within a few hops.
-    func eventually(attempts: Int = 2_000, _ condition: () async -> Bool) async -> Bool {
-        for _ in 0..<attempts {
-            if await condition() { return true }
-            await Task.yield()
-        }
-        return false
     }
 
     func currentSnapshot() async -> SessionSnapshot {

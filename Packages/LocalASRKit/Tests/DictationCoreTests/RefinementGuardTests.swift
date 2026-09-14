@@ -143,12 +143,12 @@ struct RefinementGuardTests {
         "Email mode may frame a short dictation with a greeting and sign-off",
         arguments: [
             ("明天请假", "您好，\n\n我明天需要请假一天。\n\n谢谢！"),
-            ("running late", "Hi,\n\nI'm running about ten minutes late.\n\nThanks!"),
+            ("I'm late", "Hi,\n\nI'm running late.\n\nThanks!"),
         ]
     )
     func shortDictationMayGainEmailFraming(input: String, output: String) {
-        // A fixed greeting and sign-off dwarf a short input, so a pure ratio cannot tell this
-        // apart from a runaway output.
+        // A fixed greeting and sign-off dwarf a short input without adding new facts, so a
+        // pure ratio cannot tell this apart from a runaway output.
         #expect(evaluate(output, input: input, mode: .email) == .accepted(output))
     }
 
