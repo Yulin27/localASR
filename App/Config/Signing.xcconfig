@@ -1,0 +1,14 @@
+// Code signing for local builds. See ADR 0006.
+//
+// Local builds are signed with an Apple Development identity from your personal team, so the
+// designated requirement stays stable across rebuilds and microphone and Accessibility grants
+// survive them. Ad-hoc signing would invalidate those grants on every build.
+//
+// The team is personal and is not checked in. Copy Local.xcconfig.example to Local.xcconfig
+// in this folder and set DEVELOPMENT_TEAM there.
+
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"

@@ -14,3 +14,9 @@ ModelAssets/*
 
 # Local evaluation corpora contain personal audio and transcripts.
 TestData/
+
+# Generated from App/project.yml by Scripts/generate_xcodeproj.sh.
+App/LocalASR.xcodeproj/
+
+# Personal signing team; see App/Config/Local.xcconfig.example.
+App/Config/Local.xcconfig

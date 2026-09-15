@@ -1,0 +1,118 @@
+# XcodeGen specification for the LocalASR application shell.
+#
+# The generated App/LocalASR.xcodeproj is not checked in. Regenerate it after editing this file,
+# or after adding or removing source files:
+#
+#     Scripts/generate_xcodeproj.sh
+#
+# Signing comes from Config/Signing.xcconfig, which includes the ignored Config/Local.xcconfig.
+# See ADR 0006.
+
+name: LocalASR
+
+options:
+  bundleIdPrefix: io.github.yulin27
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  xcodeVersion: "16.4"
+  groupSortPosition: top
+
+configs:
+  Debug: debug
+  Release: release
+
+configFiles:
+  Debug: Config/Signing.xcconfig
+  Release: Config/Signing.xcconfig
+
+settings:
+  base:
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    GENERATE_INFOPLIST_FILE: YES
+
+packages:
+  LocalASRKit:
+    path: ../Packages/LocalASRKit
+
+targets:
+  LocalASR:
+    type: application
+    platform: macOS
+    sources:
+      - path: Application
+      - path: Composition
+        excludes:
+          - "**/AGENTS.md"
+          - "**/CLAUDE.md"
+          - "**/.gitkeep"
+      - path: Features
+        excludes:
+          - "**/AGENTS.md"
+          - "**/CLAUDE.md"
+          - "**/.gitkeep"
+    dependencies:
+      - package: LocalASRKit
+        product: LocalASRKit
+      - package: LocalASRKit
+        product: DictationDemo
+    settings:
+      base:
+        PRODUCT_NAME: LocalASR
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.yulin27.LocalASR
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        # A menu-bar application: no Dock icon and no main menu bar of its own.
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_CFBundleDisplayName: LocalASR
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        # Hardened runtime without App Sandbox. Accessibility insertion and synthetic paste
+        # require running unsandboxed (ADR 0006). Phase 3 adds the audio-input entitlement.
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+        COMBINE_HIDPI_IMAGES: YES
+
+  LocalASRTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/LocalASRTests
+    dependencies:
+      - target: LocalASR
+      # Linked into the host application already. The test bundle resolves the symbols
+      # through the host, so linking them again would load a second copy of each module.
+      - package: LocalASRKit
+        product: DictationDemo
+        link: false
+      - package: LocalASRKit
+        product: LocalASRKit
+        link: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.yulin27.LocalASRTests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LocalASR.app/Contents/MacOS/LocalASR"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  LocalASR:
+    build:
+      targets:
+        LocalASR: all
+        LocalASRTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - LocalASRTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
