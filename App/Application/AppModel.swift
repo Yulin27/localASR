@@ -50,6 +50,13 @@ final class AppModel {
         actionSink = queue.continuation
     }
 
+    var presentation: MenuBarPresentation {
+        switch readiness {
+        case .ready: MenuBarPresentation(snapshot: snapshot)
+        case .notReady(let issue): MenuBarPresentation(issue: issue)
+        }
+    }
+
     /// Begins observing snapshots and forwarding actions. Idempotent.
     func start() {
         guard let coordinator, observation == nil else { return }
