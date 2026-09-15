@@ -10,6 +10,11 @@ fakes with no microphone, Accessibility permission, network, or model. The seven
 modules still contain placeholders, and no runtime API has been chosen yet. Adapter behaviour
 should be introduced incrementally through tested vertical slices.
 
+The application shell exists: a signed menu-bar app generated from `App/project.yml`
+(ADR 0006). Debug builds run a real coordinator over the scripted `DictationDemo`
+adapters, with a demo scenario picker in the menu; Release builds report that dictation
+is unavailable until Phase 3 supplies real adapters.
+
 ## Architectural style
 
 LocalASR is a native macOS modular monolith with ports and adapters. It ships as one application process for v0.1.

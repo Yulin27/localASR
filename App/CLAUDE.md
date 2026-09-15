@@ -23,5 +23,15 @@ This directory contains the macOS application shell. Package implementations bel
 
 ## Verification
 
-Once the Xcode project exists, build its application scheme and run UI/unit tests in addition to the package checks defined in `Packages/LocalASRKit/AGENTS.md`.
+The Xcode project is generated from `App/project.yml` and is not checked in (ADR 0006). Setup prerequisites are in `App/README.md`. Run from the repository root, in addition to the package checks defined in `Packages/LocalASRKit/AGENTS.md`:
+
+```sh
+Scripts/generate_xcodeproj.sh
+xcodebuild -project App/LocalASR.xcodeproj -scheme LocalASR -configuration Debug build
+xcodebuild -project App/LocalASR.xcodeproj -scheme LocalASR test
+```
+
+- Edit `project.yml`, never the generated project. Regenerate after adding or removing source files.
+- Build configuration and launch environment are read only in `Composition/CompositionRoot.swift`. Features never branch on `DEBUG` or on which assembly is running.
+- The Debug build runs `DictationDemo` adapters; the Release build must report not ready until real adapters exist.
 
