@@ -1,7 +1,7 @@
 # LocalASR v0.1 Implementation Plan
 
 - Status: Active
-- Last updated: 2026-09-10
+- Last updated: 2026-09-15
 - Product scope: [`Spec.md`](../Spec.md)
 - Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - Accepted decisions: [`docs/adr/`](adr/)
@@ -91,6 +91,11 @@ builds and tests pass without microphone, Accessibility, network, or model acces
 - Render coordinator snapshots and forward semantic user actions without moving
   workflow policy into views.
 
+Step-by-step plan: [`plans/phase-2.md`](plans/phase-2.md).
+
+Status: complete (2026-09-15). The manual exit-gate checklist passed on the Debug and
+Release builds; the results are recorded in the plan.
+
 ### Exit gate
 
 The application launches as a menu-bar app and can drive the fake coordinator from
@@ -106,6 +111,8 @@ the menu without constructing dependencies inside feature views.
 - Deliver through an initial copy-only inserter.
 - Show recording, processing, completion, and recoverable failure states.
 - Record privacy-safe phase timing from the first executable slice.
+- Make quitting wait, with a bound, for an in-flight session's cleanup (device release, clip
+  disposal, history write). Phase 2's shutdown cancels the session without awaiting it.
 
 ### Exit gate
 

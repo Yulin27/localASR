@@ -317,8 +317,8 @@ public actor DictationCoordinator {
     ///
     /// That window is also the one place the published ``AcceptedActions`` lag behind: they
     /// still describe the previous session, because publishing anything for this one would
-    /// break the freeze (ADR 0003 §5). An action sent then is decided here, against the
-    /// session actually in flight (ADR 0005).
+    /// break the freeze (ADR 0003 §5). An action sent then is decided against the session
+    /// actually in flight (ADR 0005) — a stale Dismiss is ignored rather than acted on.
     private func phase(of session: ActiveSession) -> DictationPhase {
         snapshot.sessionID == session.id ? snapshot.phase : .preparing
     }
@@ -394,7 +394,11 @@ public actor DictationCoordinator {
     }
 
     private func dismiss() {
-        guard snapshot.phase.isTerminal else { return }
+        // A terminal snapshot can still be showing after a new session has started: it stays
+        // published until that session freezes its destination. Dismissing it then would
+        // publish inside the pre-freeze window, and publish an idle state for a session that
+        // is in flight.
+        guard active == nil, snapshot.phase.isTerminal else { return }
         publish(.idle)
     }
 
@@ -785,7 +789,8 @@ public actor DictationCoordinator {
     /// What ``handle(_:)`` would do while `shown` is the published snapshot.
     ///
     /// Mirrors the action handlers, and reads the same state they do: `toggleRecording` and
-    /// `cancel` decide from the session in flight, and `dismiss` from the published phase. It
+    /// `cancel` decide from the session in flight, and `dismiss` from the published phase
+    /// when no session is in flight. It
     /// is recomputed whenever that state changes in a way observers could act on — see
     /// `refreshAcceptedActions()` for the one change that publishes no new phase.
     private func acceptedActions(showing shown: SessionSnapshot) -> AcceptedActions {
@@ -806,7 +811,7 @@ public actor DictationCoordinator {
         return AcceptedActions(
             toggle: toggle,
             cancel: active != nil,
-            dismiss: shown.phase.isTerminal
+            dismiss: active == nil && shown.phase.isTerminal
         )
     }
 

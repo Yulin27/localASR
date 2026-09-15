@@ -3,8 +3,11 @@ import AppKit
 /// Owns the application's lifetime.
 ///
 /// The composition is built once, when the delegate is created, and lives until the application
-/// quits. Quitting waits for the coordinator to shut down, so a session in flight releases what
-/// it holds before the process exits.
+/// quits. Quitting waits for the coordinator to shut down and for the model to stop observing it.
+/// It does not wait for a session in flight to finish its cleanup: shutting down cancels that
+/// session, and its release of the device, disposal of the clip, and history write run on after
+/// termination has been allowed. Phase 3 adds a bounded wait for them, once real adapters hold
+/// real resources.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model: AppModel

@@ -31,12 +31,17 @@ struct CompositionTests {
     }
     #endif
 
-    @Test("A test host selects the test assembly")
-    func testHostSelectsTestAssembly() {
-        let kind = CompositionRoot.assemblyKind(
-            environment: ["XCTestConfigurationFilePath": "/tmp/session.xctestconfiguration"]
-        )
+    @Test(
+        "A test host selects the test assembly in Debug and production in Release",
+        arguments: ["XCTestConfigurationFilePath", "XCTestSessionIdentifier"]
+    )
+    func testHostSelectsByConfiguration(_ variable: String) {
+        let kind = CompositionRoot.assemblyKind(environment: [variable: "set"])
+        #if DEBUG
         #expect(kind == .test)
+        #else
+        #expect(kind == .production)
+        #endif
     }
 
     @Test("An ordinary launch selects demo in Debug and production in Release")

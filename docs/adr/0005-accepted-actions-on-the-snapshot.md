@@ -13,7 +13,7 @@ phase. That source is wrong in a way the view cannot detect.
 The coordinator decides actions from different state than the snapshot shows:
 
 - `toggleRecording` and `cancel` decide from `active`, the session in flight.
-- `dismiss` decides from the published phase.
+- `dismiss` decides from the published phase, and only while no session is in flight.
 - `finalize` clears `active` before it awaits the device release and the history write, and only
   then publishes the terminal snapshot (ADR 0003 §4 and its consequences). During that window the
   snapshot still reads the last processing phase, while the coordinator would already start a new
@@ -58,8 +58,10 @@ idle, preparing, recording, transcribing, normalizing, refining, inserting, inse
 Between an activation and the moment the new session freezes its context, nothing may be published
 (ADR 0003 §5). The snapshot on screen still belongs to the previous session, and so do its accepted
 actions. An action sent in that window is still decided by the coordinator against the session
-actually in flight: a toggle stops it, a cancel cancels it. Only a command's label can be stale,
-and only for the time target capture and settings take.
+actually in flight: a toggle stops it, a cancel cancels it, and a dismiss is ignored, because
+dismissing the previous session's terminal snapshot would publish inside the window. Only a
+command's label or enabled state can be stale, and only for the time target capture and settings
+take.
 
 ## Consequences
 

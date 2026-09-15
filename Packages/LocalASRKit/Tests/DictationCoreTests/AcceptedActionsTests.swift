@@ -218,6 +218,33 @@ struct AcceptedActionsTests {
         #expect(cancelled.acceptedActions == Self.finished)
     }
 
+    @Test("A dismiss sent before a new session is shown publishes nothing")
+    func preFreezeDismissIsIgnored() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+        let finished = try await harness.runSession()
+        #expect(finished.phase == .completed)
+        let captures = await harness.targetProvider.callCount
+
+        await harness.parkOnly(.targetCapture)
+        defer { Task { await harness.releaseAll() } }
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("the new session parked at target capture") {
+            await harness.targetProvider.callCount > captures
+        }
+
+        // The previous session's terminal snapshot is still published, and still offers the
+        // dismiss it offered before this session began.
+        #expect(await harness.currentSnapshot() == finished)
+
+        await harness.coordinator.handle(.dismiss)
+        #expect(await harness.currentSnapshot() == finished)
+
+        // The session in flight is untouched: a cancel still ends it.
+        await harness.coordinator.handle(.cancel)
+        #expect(await harness.currentSnapshot().phase == .cancelled)
+    }
+
     @Test("A coordinator that was shut down accepts nothing")
     func shutDownAcceptsNothing() async {
         let harness = DictationHarness()

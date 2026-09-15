@@ -10,14 +10,16 @@ enum CompositionRoot {
         case test
     }
 
-    /// The test assembly when hosted by tests, otherwise demo in Debug and production in Release.
+    /// In Debug, the test assembly when hosted by tests and demo otherwise. Always production in
+    /// Release: the launch environment is outside the build's control, so it must not be able to
+    /// put scripted adapters into a Release build.
     static func assemblyKind(environment: [String: String]) -> AssemblyKind {
+        #if DEBUG
         if environment["XCTestConfigurationFilePath"] != nil
             || environment["XCTestSessionIdentifier"] != nil
         {
             return .test
         }
-        #if DEBUG
         return .demo
         #else
         return .production
@@ -28,13 +30,11 @@ enum CompositionRoot {
         switch kind {
         case .production:
             return ProductionAssembly()
-        case .test:
-            return TestAssembly()
-        case .demo:
+        case .test, .demo:
             #if DEBUG
-            return DemoAssembly()
+            return kind == .test ? TestAssembly() : DemoAssembly()
             #else
-            // Not selectable in Release; see `assemblyKind(environment:)`.
+            // Neither is selectable in Release; see `assemblyKind(environment:)`.
             return ProductionAssembly()
             #endif
         }
