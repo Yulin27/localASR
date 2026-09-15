@@ -179,6 +179,50 @@ struct CoordinatorCancellationTests {
         #expect(transcribing.duration == FakeTimeSource.step)
     }
 
+    @Test("Two overlapping cancellations each keep their own moment")
+    func overlappingCancellationsKeepTheirOwnMoments() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+
+        // The recogniser ignores cancellation, so both sessions stay in flight at once —
+        // which is the only way two abandoned runs overlap.
+        let recognition = Gate()
+        await harness.recognizer.setGate(recognition)
+        defer { Task { await recognition.open() } }
+
+        // The first session is abandoned inside that recogniser, so it is still unwinding
+        // while the user starts — and gives up on — the next one.
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("the first recognition was entered") {
+            await harness.recognizer.callCount == 1
+        }
+        await harness.coordinator.handle(.cancel)
+
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("the second recognition was entered") {
+            await harness.recognizer.callCount == 2
+        }
+        await harness.coordinator.handle(.cancel)
+
+        // Both adapters run on for a long time after both users' cancellations.
+        for _ in 0..<20 {
+            _ = harness.time.now()
+        }
+        await recognition.open()
+        try await harness.waitForCleanup(sessions: 2)
+
+        let metrics = harness.metrics.all
+        #expect(metrics.count == 2)
+        // A single stored moment would leave the first session billed for its overrun.
+        for session in metrics {
+            #expect(session.outcome == .cancelled)
+            #expect(session.timings.last?.phase == .transcribing)
+            #expect(session.timings.last?.duration == FakeTimeSource.step)
+        }
+    }
+
     @Test("Cancelling twice is idempotent")
     func cancelIsIdempotent() async throws {
         let harness = DictationHarness()

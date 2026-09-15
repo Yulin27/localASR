@@ -150,26 +150,57 @@ public struct RefinementOutputGuard: Sendable {
     ///
     /// Checked only at the start: an email refinement may legitimately contain these words
     /// later in the text, but must not open with them.
+    /// Openers that are framing only when the speaker did not use them.
+    ///
+    /// Every one of these is also a perfectly ordinary way to start a dictated message, so
+    /// the input has the final say.
     private static let preamblePhrases = [
         "here is", "here's", "sure,", "sure!", "of course", "certainly,",
         "以下是", "下面是", "这是您", "这是你", "已为您", "好的，以下",
         "voici", "voici le", "bien sûr",
     ]
 
+    /// Framing that names the transcript it is introducing.
+    ///
+    /// Rejected whatever the input opens with. "Here is the cleaned version" is a sentence a
+    /// model writes *about* someone's text, not one a person dictates, so unlike the openers
+    /// above it needs no comparison with the input — and needs none, because the input
+    /// sharing a generic first word ("here is my plan") is exactly how the canonical preamble
+    /// would otherwise get through.
+    ///
+    /// Deliberately the canonical set rather than an exhaustive one. A preamble that is not
+    /// listed costs a refinement nobody sees; a phrase listed too loosely costs the user
+    /// theirs, which is the more expensive mistake.
+    private static let selfReferentialFraming = [
+        "here is the cleaned", "here's the cleaned",
+        "here is the corrected", "here's the corrected",
+        "here is the revised", "here's the revised",
+        "here is the polished", "here's the polished",
+        "here is the rewritten", "here's the rewritten",
+        "以下是清理后", "以下是整理后", "以下是修改后",
+        "下面是清理后", "下面是整理后", "下面是修改后",
+        "voici le texte corrigé", "voici le texte nettoyé", "voici la version corrigée",
+    ]
+
     private static let normalizedPreamblePhrases = preamblePhrases.map(normalizedOpening)
+    private static let normalizedFraming = selfReferentialFraming.map(normalizedOpening)
 
     /// Whether the output opens with assistant framing the speaker did not dictate.
     ///
     /// The phrase alone is not evidence. People open dictated messages with "sure", "voici"
     /// and "这是你" all the time, and punctuating such an opening is the refinement working,
-    /// not a preamble — so a phrase counts only when the input did not already start with it.
+    /// not a preamble — so an opener counts only when the input did not already start with
+    /// it. Framing that names the transcript counts either way.
     ///
-    /// Every matching phrase is considered, not the first. The phrases overlap, and stopping
-    /// at the shortest match would clear the output on the strength of a word the speaker
-    /// did say: "voici mon problème" refined to "Voici le texte corrigé : …" shares "voici"
-    /// with its input, while the framing that was added is "voici le".
+    /// Every matching opener is considered, not the first. They overlap, and stopping at the
+    /// shortest match would clear the output on the strength of a word the speaker did say:
+    /// "voici mon problème" refined to "Voici le texte corrigé : …" shares "voici" with its
+    /// input, while the framing that was added is "voici le".
     static func hasAssistantPreamble(_ text: String, input: String) -> Bool {
         let head = normalizedOpening(text)
+        if normalizedFraming.contains(where: { opensWith(head, $0) }) {
+            return true
+        }
         let inputHead = normalizedOpening(input)
         return normalizedPreamblePhrases.contains { phrase in
             opensWith(head, phrase) && !opensWith(inputHead, phrase)

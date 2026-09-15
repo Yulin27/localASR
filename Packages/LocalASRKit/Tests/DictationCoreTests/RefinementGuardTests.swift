@@ -144,6 +144,21 @@ struct RefinementGuardTests {
         #expect(evaluate(output, input: input, mode: .message) == .rejected(.refinementPreamble))
     }
 
+    @Test(
+        "Framing that names the transcript is rejected even when the input opens the same way",
+        arguments: [
+            ("here is my plan for tomorrow", "Here is the cleaned version: my plan for tomorrow."),
+            ("here's my plan for tomorrow", "Here's the corrected text: my plan for tomorrow."),
+            ("以下是我明天的安排先确认范围", "以下是清理后的文本：我明天的安排，先确认范围。"),
+            ("voici le document que tu m'as demandé", "Voici le texte corrigé : le document que tu m'as demandé."),
+        ]
+    )
+    func transcriptNamingFramingIsAlwaysRejected(input: String, output: String) {
+        // The shared opener defence is not enough on its own: the speaker did say "here is",
+        // and the model then wrote a sentence about their text rather than their text.
+        #expect(evaluate(output, input: input, mode: .message) == .rejected(.refinementPreamble))
+    }
+
     @Test("A preamble written with a typographic apostrophe is still rejected")
     func typographicApostrophePreambleIsRejected() {
         let body = "把消息发出去，记得告诉他我们下周再确认细节。"

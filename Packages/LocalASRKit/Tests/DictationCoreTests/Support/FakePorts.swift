@@ -169,6 +169,7 @@ actor FakeSpeechRecognizer: SpeechRecognizing {
     )
     private(set) var requests: [RecognitionRequest] = []
     private let latch: Latch?
+    private var gate: Gate?
 
     init(latch: Latch? = nil) {
         self.latch = latch
@@ -178,9 +179,17 @@ actor FakeSpeechRecognizer: SpeechRecognizing {
         self.response = response
     }
 
+    /// Holds recognition open across a cancellation, unlike the boundary latch, which
+    /// releases on cancel. A long MLX or Core ML call behaves this way, and it is the only
+    /// way to keep two abandoned sessions unwinding at once.
+    func setGate(_ gate: Gate?) {
+        self.gate = gate
+    }
+
     func recognize(_ request: RecognitionRequest) async throws -> RecognitionResult {
         requests.append(request)
         await latch?.arriveAndWait()
+        await gate?.arriveAndWait()
         return try response.resolve()
     }
 

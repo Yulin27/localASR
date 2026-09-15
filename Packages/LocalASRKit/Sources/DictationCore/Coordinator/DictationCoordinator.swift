@@ -135,13 +135,17 @@ public actor DictationCoordinator {
     /// Sessions waiting for ``captureOwner`` to clear.
     private var captureWaiters: [CheckedContinuation<Void, Never>] = []
 
-    /// When the user cancelled, and which generation they cancelled.
+    /// When the user cancelled each generation they cancelled.
     ///
     /// A cancelled session ends the moment they ask. An adapter that ignores cancellation can
     /// keep running for tens of seconds after that, and reading the clock when it finally
     /// returns would bill all of it to the stage the user was in — inflating the very latency
     /// the stage timings exist to measure.
-    private var cancellation: (generation: UInt64, at: Timestamp)?
+    ///
+    /// Keyed by generation rather than held as one value, because abandoned runs overlap: a
+    /// session cancelled inside a slow adapter is still unwinding while the user starts, and
+    /// gives up on, the next one. Each entry is removed by its own run's `finalize`.
+    private var cancellations: [UInt64: Timestamp] = [:]
 
     public init(
         dependencies: Dependencies,
@@ -328,7 +332,7 @@ public actor DictationCoordinator {
         session.task.cancel()
 
         // Read now, while the user is asking, rather than when the driver unwinds.
-        cancellation = (session.generation, dependencies.time.now())
+        cancellations[session.generation] = dependencies.time.now()
 
         // The coordinator gives the session up here rather than when its driver finally
         // returns. Cancelling a task does not stop an adapter that never checks for it, and a
@@ -744,12 +748,10 @@ public actor DictationCoordinator {
             stopSignal = nil
         }
 
-        // Taken now, before anything suspends. The session ended when the user asked, and the
-        // last stage is measured to that moment rather than to whenever the adapter returned.
-        let cancelledAt = cancellation?.generation == run.generation ? cancellation?.at : nil
-        if cancelledAt != nil {
-            cancellation = nil
-        }
+        // Taken now, before anything suspends, and removed in the same step: the session
+        // ended when the user asked, and the last stage is measured to that moment rather
+        // than to whenever the adapter returned.
+        let cancelledAt = cancellations.removeValue(forKey: run.generation)
 
         let terminal = run.terminalPhase
         let reachedTerminal = run.phase.canTransition(to: terminal)
