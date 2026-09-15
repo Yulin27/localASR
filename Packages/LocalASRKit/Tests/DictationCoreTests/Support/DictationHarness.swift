@@ -198,6 +198,23 @@ final class DictationHarness: Sendable {
         }
     }
 
+    /// Fails if the session reaches `phase` at all.
+    ///
+    /// The negative counterpart to ``waitForPhase(_:attempts:)``, for proving that something
+    /// is genuinely being held rather than merely slow. `attempts` is generous: every port
+    /// the session would pass through on the way is open, so reaching `phase` costs it only a
+    /// handful of actor hops, and anything that can arrive will arrive well inside this.
+    func expectNeverReaches(
+        _ phase: DictationPhase,
+        attempts: Int = 2_000
+    ) async -> Bool {
+        for _ in 0..<attempts {
+            if await coordinator.currentSnapshot().phase == phase { return false }
+            await Task.yield()
+        }
+        return true
+    }
+
     /// Spins until `condition` holds. Same bounded-and-loud contract as ``waitForPhase(_:)``.
     func waitUntil(
         _ description: String,
@@ -248,6 +265,19 @@ extension DictationHarness.Boundary {
         switch self {
         case .targetCapture, .settings, .capturePrepare: true
         case .captureStart, .captureStop, .voiceActivity, .recognition, .deterministic, .refinement, .insertion: false
+        }
+    }
+
+    /// Whether the session has claimed the microphone by the time it reaches this boundary.
+    ///
+    /// A session cancelled before it has must not release a device it never took: that
+    /// release would land on whichever session picks the microphone up next.
+    var hasClaimedDevice: Bool {
+        switch self {
+        case .targetCapture, .settings: false
+        case .capturePrepare, .captureStart, .captureStop, .voiceActivity, .recognition,
+            .deterministic, .refinement, .insertion:
+            true
         }
     }
 }

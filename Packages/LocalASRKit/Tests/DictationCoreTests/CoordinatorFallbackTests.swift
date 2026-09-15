@@ -327,6 +327,80 @@ struct CoordinatorFallbackTests {
         #expect(await harness.history.records.isEmpty)
     }
 
+    @Test("A cancelled session's snapshot still reports a history write it lost")
+    func historyFailureReachesACancelledSnapshot() async throws {
+        let harness = DictationHarness()
+        await harness.parkOnly(.insertion)
+        await harness.history.setWriteError(UnmappedProviderError())
+
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("insertion was entered") {
+            await harness.inserter.callCount == 1
+        }
+
+        // `.cancelled` is published before the write is even attempted, so the degradation
+        // has to reach the snapshot afterwards or the user never learns their text reached
+        // the document but not their history.
+        await harness.coordinator.handle(.cancel)
+        #expect(!(await harness.currentSnapshot().fallbacks.contains(.historyUnavailable)))
+
+        await harness.releaseAll()
+        try await harness.waitForCleanup()
+
+        let terminal = await harness.currentSnapshot()
+        #expect(terminal.phase == .cancelled)
+        #expect(terminal.fallbacks.contains(.historyUnavailable))
+        #expect(harness.metrics.last?.fallbacks.contains(.historyUnavailable) == true)
+    }
+
+    @Test("A late history failure is not published into a new session's preparation")
+    func lateHistoryFailureDoesNotPublishOverAStartingSession() async throws {
+        let harness = DictationHarness()
+        await harness.parkOnly(.insertion)
+        await harness.history.setWriteError(UnmappedProviderError())
+        let write = Latch()
+        await harness.history.setWriteGate(write)
+
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("insertion was entered") {
+            await harness.inserter.callCount == 1
+        }
+        await harness.coordinator.handle(.cancel)
+        let cancelled = try #require(await harness.currentSnapshot().sessionID)
+
+        // Let the abandoned run reach its history write and park there.
+        await harness.parkOnly(.targetCapture)
+        try await harness.waitUntil("the history write was entered") {
+            await harness.history.attempts == 1
+        }
+
+        // A new session is under way but has not frozen its destination, so the snapshot on
+        // screen is still the cancelled one's.
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("the new session parked at target capture") {
+            await harness.targetProvider.callCount == 2
+        }
+        #expect(await harness.currentSnapshot().sessionID == cancelled)
+
+        await write.open()
+        try await harness.waitForCleanup()
+
+        // Publishing here would be an observer event inside the window the new session needs
+        // to capture its destination, so the failure is reported only in metrics.
+        #expect(!(await harness.currentSnapshot().fallbacks.contains(.historyUnavailable)))
+        #expect(harness.metrics.last?.fallbacks.contains(.historyUnavailable) == true)
+
+        // The new session then runs normally and owns the snapshot from its own `preparing`.
+        await harness.releaseAll()
+        _ = try await harness.waitForPhase(.recording)
+        await harness.coordinator.handle(.toggleRecording)
+        let terminal = try await harness.waitForTerminal()
+        #expect(terminal.phase == .completed)
+        #expect(terminal.sessionID != cancelled)
+    }
+
     @Test("A history write that succeeds reports no degradation")
     func successfulHistoryWriteReportsNothing() async throws {
         let harness = DictationHarness()

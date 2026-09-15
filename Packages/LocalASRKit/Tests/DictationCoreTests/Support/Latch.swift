@@ -54,3 +54,36 @@ actor Latch {
         isOpen = false
     }
 }
+
+/// A suspension point that ignores cancellation.
+///
+/// ``Latch`` releases its waiters when the waiting task is cancelled, which is how a
+/// well-behaved adapter reacts. This models the opposite and more dangerous case the
+/// coordinator has to survive: a call already inside a model or a device that keeps running
+/// after the user cancelled, and returns in its own time.
+actor Gate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func arriveAndWait() async {
+        if isOpen { return }
+        await withCheckedContinuation { continuation in
+            if isOpen {
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+            }
+        }
+    }
+
+    /// Releases every waiter. Idempotent.
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let pending = waiters
+        waiters.removeAll()
+        for continuation in pending {
+            continuation.resume()
+        }
+    }
+}

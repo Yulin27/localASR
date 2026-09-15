@@ -163,12 +163,17 @@ public struct RefinementOutputGuard: Sendable {
     /// The phrase alone is not evidence. People open dictated messages with "sure", "voici"
     /// and "这是你" all the time, and punctuating such an opening is the refinement working,
     /// not a preamble — so a phrase counts only when the input did not already start with it.
+    ///
+    /// Every matching phrase is considered, not the first. The phrases overlap, and stopping
+    /// at the shortest match would clear the output on the strength of a word the speaker
+    /// did say: "voici mon problème" refined to "Voici le texte corrigé : …" shares "voici"
+    /// with its input, while the framing that was added is "voici le".
     static func hasAssistantPreamble(_ text: String, input: String) -> Bool {
         let head = normalizedOpening(text)
-        guard let phrase = normalizedPreamblePhrases.first(where: { opensWith(head, $0) }) else {
-            return false
+        let inputHead = normalizedOpening(input)
+        return normalizedPreamblePhrases.contains { phrase in
+            opensWith(head, phrase) && !opensWith(inputHead, phrase)
         }
-        return !opensWith(normalizedOpening(input), phrase)
     }
 
     /// The opening of `text`, lowercased, with typographic apostrophes straightened and

@@ -226,11 +226,7 @@ struct CoordinatorLifecycleTests {
         let metrics = harness.metrics.all
         #expect(metrics.count == 1)
 
-        // History is written after the terminal snapshot is published, so the terminal state
-        // alone does not imply the record exists yet.
-        try await harness.waitUntil("history recorded the session") {
-            await harness.history.records.count == 1
-        }
+        // Written before the terminal snapshot, so seeing the session end is enough.
         let records = await harness.history.records
 
         let record = try #require(records.first)
@@ -355,10 +351,14 @@ struct CoordinatorLifecycleTests {
             await harness.targetProvider.callCount > 0
         }
 
-        // A view told about `preparing` here would open a panel and take the focus the
-        // session is about to freeze, so it is told nothing at all yet.
+        // A view that opened a panel on `preparing` would take the focus this session is
+        // about to freeze, whether it was pushed that snapshot or read it. So the state is
+        // not merely unsent — it does not exist yet, for a poller or a late subscriber
+        // either.
         let published = await harness.currentSnapshot()
-        #expect(published.phase == .preparing)
+        #expect(published.phase == .idle)
+        var late = await harness.coordinator.snapshots().makeAsyncIterator()
+        #expect(await late.next()?.phase == .idle)
 
         await harness.releaseAll()
         _ = try await harness.waitForPhase(.recording)

@@ -46,13 +46,18 @@ struct CoordinatorCancellationTests {
         }
 
         if boundary.isAfterCaptureStop {
-            // Capture already stopped, so the device is not released again.
+            // Capture already handed over a clip, so the device is not released again.
             #expect(events.count(where: { $0 == .cancel }) == 0)
             #expect(discards == 1)
-        } else {
-            // Recording never produced a clip, so the device must be released.
+        } else if boundary.hasClaimedDevice {
+            // The session holds the microphone and produced no clip, so it must release it.
             #expect(events.count(where: { $0 == .cancel }) == 1)
             #expect(events.count(where: { $0 == .stop }) == 0)
+            #expect(discards == 0)
+        } else {
+            // Cancelled before the microphone was ever claimed. Releasing one this session
+            // never took would land on whichever session picks it up next.
+            #expect(events.isEmpty, "capture events were \(events)")
             #expect(discards == 0)
         }
 
@@ -98,6 +103,50 @@ struct CoordinatorCancellationTests {
         #expect(terminal.phase == .cancelled)
         #expect(events == [.prepare, .start, .cancel])
         #expect(discards == 0)
+    }
+
+    @Test("A cancellation during insertion still reports what happened to the text")
+    func cancelDuringInsertionKeepsTheOutcome() async throws {
+        let harness = DictationHarness()
+        await harness.parkOnly(.insertion)
+
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("insertion was entered") {
+            await harness.inserter.callCount == 1
+        }
+
+        await harness.coordinator.handle(.cancel)
+        // Answered before the inserter came back, so it cannot know the outcome yet.
+        #expect(await harness.currentSnapshot().insertion == nil)
+
+        await harness.releaseAll()
+        try await harness.waitForCleanup()
+
+        // The delivery went ahead regardless, and the user needs to know whether their text
+        // landed in the document, went to the clipboard, or failed.
+        let terminal = await harness.currentSnapshot()
+        #expect(terminal.phase == .cancelled)
+        #expect(terminal.insertion?.delivery == .insertedDirectly)
+        #expect(terminal.transcript.finalText == "refined text")
+    }
+
+    @Test("A stop already buffered does not survive a cancellation")
+    func bufferedStopDoesNotSurviveCancellation() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+        try await harness.startRecording()
+
+        // The user presses to stop and then changes their mind. The stop is already in the
+        // buffer, and a finished signal still delivers what it holds, so reaching the stop
+        // wait proves nothing about whether the session is still wanted.
+        await harness.coordinator.handle(.toggleRecording)
+        await harness.coordinator.handle(.cancel)
+        try await harness.waitForCleanup()
+
+        // Stopping would have turned a cancelled recording into a clip.
+        #expect(await harness.capture.events == [.prepare, .start, .cancel])
+        #expect(await harness.clip.discardCount == 0)
     }
 
     @Test("Cancelling twice is idempotent")
@@ -174,6 +223,35 @@ struct CoordinatorCancellationTests {
         #expect(cancelled.transcript.normalizedText == "normalized text")
         #expect(cancelled.transcript.finalText == "refined text")
         #expect(cancelled.context != nil)
+    }
+
+    @Test("A session cancelled before it was ever shown does not inherit the last one's text")
+    func cancelBeforeFirstPublicationDoesNotInheritTheLastSession() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+        let previous = try await harness.runSession()
+        #expect(previous.transcript.finalText == "refined text")
+
+        // Parked before the destination is frozen, which is before anything is published.
+        await harness.parkOnly(.targetCapture)
+        defer { Task { await harness.releaseAll() } }
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("the second session parked at target capture") {
+            await harness.targetProvider.callCount == 2
+        }
+
+        // Still showing the finished session, because this one has published nothing.
+        #expect(await harness.currentSnapshot().sessionID == previous.sessionID)
+
+        await harness.coordinator.handle(.cancel)
+        let cancelled = await harness.currentSnapshot()
+
+        #expect(cancelled.phase == .cancelled)
+        #expect(cancelled.sessionID != previous.sessionID)
+        // Carrying the previous session's text into this one's terminal state would show the
+        // user a result they did not just dictate.
+        #expect(cancelled.transcript == .empty)
+        #expect(cancelled.context == nil)
     }
 
     @Test("Cancelling from a finished session does nothing")

@@ -130,6 +130,20 @@ struct RefinementGuardTests {
         #expect(evaluate(output, input: input, mode: .message) == .accepted(output))
     }
 
+    @Test(
+        "A shared opening word does not excuse the framing added after it",
+        arguments: [
+            ("voici mon problème avec le déploiement", "Voici le texte corrigé : mon problème avec le déploiement."),
+            ("这是我的想法我们先确认范围", "这是你要的整理结果：我的想法，我们先确认范围。"),
+        ]
+    )
+    func sharedOpenerDoesNotExcuseAddedFraming(input: String, output: String) {
+        // The speaker did say "voici" / "这是", so the shortest phrase matches both sides.
+        // The framing that was actually added is the longer one, and stopping at the first
+        // match would clear the output on the strength of a word the speaker did say.
+        #expect(evaluate(output, input: input, mode: .message) == .rejected(.refinementPreamble))
+    }
+
     @Test("A preamble written with a typographic apostrophe is still rejected")
     func typographicApostrophePreambleIsRejected() {
         let body = "把消息发出去，记得告诉他我们下周再确认细节。"

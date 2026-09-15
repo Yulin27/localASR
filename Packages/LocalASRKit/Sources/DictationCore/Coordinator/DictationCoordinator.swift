@@ -118,6 +118,23 @@ public actor DictationCoordinator {
     private var subscribers: [UUID: AsyncStream<SessionSnapshot>.Continuation] = [:]
     private var isShutDown = false
 
+    /// The generation that holds the microphone, from just before `prepare()` until it has
+    /// either produced a clip or released the device.
+    ///
+    /// The device is handed over, never shared. Cancelling a task does not stop a `prepare()`,
+    /// `start()` or `stop()` already inside an adapter, and the release that follows runs
+    /// outside the session's cancellation — so a run the coordinator has let go of can still
+    /// be driving the microphone, and an old `stop()` landing after a new `start()` would stop
+    /// the wrong recording. A session waits for this to clear before it touches capture.
+    ///
+    /// It is also what says whether a finishing run has a device to release at all. A session
+    /// cancelled before it ever claimed one must not call `cancel()`: that call would land on
+    /// whichever session takes the microphone next.
+    private var captureOwner: UInt64?
+
+    /// Sessions waiting for ``captureOwner`` to clear.
+    private var captureWaiters: [CheckedContinuation<Void, Never>] = []
+
     public init(
         dependencies: Dependencies,
         sessionIDs: SessionIDGenerator = .random,
@@ -211,10 +228,17 @@ public actor DictationCoordinator {
     // MARK: - Actions
 
     private func toggle() {
-        switch snapshot.phase {
-        case .idle, .completed, .cancelled, .failed:
+        // Whether a session is in flight is the question, and the published phase is not a
+        // reliable answer to it: a finished session's cleanup runs after the coordinator has
+        // let the session go, so a slow history store leaves the phase reading `.inserting`
+        // when there is nothing left to stop. Deciding from the phase alone would leave the
+        // user unable to dictate until that store returned.
+        guard let session = active else {
             startSession()
+            return
+        }
 
+        switch phase(of: session) {
         case .preparing, .recording:
             // A second activation ends recording. If the driver has not parked yet the signal
             // is buffered, and its wait returns immediately — that is what makes a toggle
@@ -225,7 +249,44 @@ public actor DictationCoordinator {
             // Recording has already stopped. A further activation has nothing to stop, and
             // starting a second session here would abandon text the user has already spoken.
             break
+
+        case .idle, .completed, .cancelled, .failed:
+            // Unreachable: a session in flight is always in one of the phases above.
+            break
         }
+    }
+
+    /// Suspends until no run that the coordinator has let go of can still be using the
+    /// microphone.
+    ///
+    /// Looped rather than checked once: a resumed waiter claims the device in a later actor
+    /// step, so a second waiter resumed alongside it must wait again.
+    private func awaitCaptureHandover() async {
+        while captureOwner != nil {
+            await withCheckedContinuation { continuation in
+                captureWaiters.append(continuation)
+            }
+        }
+    }
+
+    /// Gives the microphone up on behalf of `generation`, and lets the next session take it.
+    private func releaseCaptureOwnership(_ generation: UInt64) {
+        guard captureOwner == generation else { return }
+        captureOwner = nil
+        let waiting = captureWaiters
+        captureWaiters.removeAll()
+        for continuation in waiting {
+            continuation.resume()
+        }
+    }
+
+    /// The phase of the session currently in flight.
+    ///
+    /// A session publishes nothing until it has frozen its destination, so until then the
+    /// snapshot still belongs to the previous one. Such a session is reported as `preparing`,
+    /// which is exactly what it is doing.
+    private func phase(of session: ActiveSession) -> DictationPhase {
+        snapshot.sessionID == session.id ? snapshot.phase : .preparing
     }
 
     private func startSession() {
@@ -235,13 +296,11 @@ public actor DictationCoordinator {
         let (stream, continuation) = AsyncStream.makeStream(of: StopSignal.self)
         stopSignal = continuation
 
-        // The state machine enters `preparing` now, so a second activation stops this session
-        // rather than starting another one. Observers are not told yet: the destination is
-        // captured in the task below, and a view that reacted to `preparing` by opening a
-        // panel would move the focus this session is about to freeze. `performSession`
-        // publishes the first snapshot once the context is frozen.
-        setState(SessionSnapshot(phase: .preparing, sessionID: id))
-
+        // Nothing is published here, and the stored snapshot is left alone. The destination
+        // is captured in the task below, and a view that reacted to a `preparing` snapshot by
+        // opening a panel would move the focus this session is about to freeze — whether it
+        // was pushed the snapshot or read it. `performSession` publishes the first one once
+        // the context is frozen; until then `active` is what says a session is in flight.
         let run = SessionRun(
             id: id,
             generation: generation,
@@ -269,14 +328,25 @@ public actor DictationCoordinator {
         // The abandoned run keeps only its cleanup. It no longer owns the published state, so
         // `finalize` releases the device, discards the clip, writes any history the session
         // earned and records its metrics, without publishing anything.
+        //
+        // The microphone needs nothing here. `captureOwner` already records whether this run
+        // is holding it, and the run gives it up itself — as soon as `stop()` hands over a
+        // clip, or once `finalize` has released the device.
+        let hasPublished = snapshot.sessionID == session.id
+
         active = nil
         stopSignal = nil
-        if snapshot.phase.canTransition(to: .cancelled) {
-            // Moved rather than rebuilt: a session cancelled during refinement has already
-            // produced deterministic text, and the terminal snapshot is where the user still
-            // sees it.
-            publish(snapshot.moved(to: .cancelled))
-        }
+
+        // Moved rather than rebuilt when the session has been published: one cancelled during
+        // refinement has already produced deterministic text, and the terminal snapshot is
+        // where the user still sees it. A session cancelled before it published anything gets
+        // a bare terminal snapshot — inheriting the previous session's would show its text as
+        // though it belonged to this one.
+        publish(
+            hasPublished
+                ? snapshot.moved(to: .cancelled)
+                : SessionSnapshot(phase: .cancelled, sessionID: session.id)
+        )
     }
 
     private func dismiss() {
@@ -349,6 +419,15 @@ public actor DictationCoordinator {
         // LocalASR, or the wrong field, as the place its text belongs.
         publish(makeSnapshot(phase: .preparing, run: run))
 
+        // An earlier session's unfinished capture work is the one thing this session cannot
+        // simply take over: both talk to the same device, and none of it stops because that
+        // session was cancelled. Waiting here is what keeps a late `stop()` or `cancel()`
+        // from ending the recording started below. The wait ends as soon as that session is
+        // finished with the device, not when the rest of its cleanup is.
+        await awaitCaptureHandover()
+        try ensureStillOwns(run, stage: .preparing)
+
+        captureOwner = run.generation
         try await dependencies.capture.prepare()
         // A microphone that turns on after the user cancelled is a privacy failure, so the
         // cancellation is honoured here rather than at the next phase change.
@@ -362,9 +441,19 @@ public actor DictationCoordinator {
             // The signal finished without a stop: the session was cancelled or shut down.
             throw DictationFailure.cancelled(stage: .recording)
         }
+        // A stop already in the buffer is still delivered after the signal is finished, so
+        // arriving here does not mean the session is still wanted: the user can press to stop
+        // and then cancel before this resumes. Cancelling wins — it releases the device
+        // instead of stopping it into a recording nobody asked to keep.
+        try ensureStillOwns(run, stage: .recording)
 
         let clip = try await dependencies.capture.stop()
         run.clip = clip
+        // The recording is in hand and this session will not call capture again, so the
+        // microphone is free now rather than at the end of the pipeline. A session the user
+        // starts next does not have to wait out this one's transcription, refinement, or the
+        // disposal of this clip.
+        releaseCaptureOwnership(run.generation)
         try advance(to: .transcribing, run: &run)
 
         let segment = try await trimSpeech(in: clip, run: &run)
@@ -605,16 +694,8 @@ public actor DictationCoordinator {
         )
     }
 
-    /// Records the coordinator's state without telling observers.
-    ///
-    /// For the one state change they must not act on yet: a session enters `preparing` the
-    /// moment the shortcut is pressed, but its destination is only frozen a moment later.
-    private func setState(_ next: SessionSnapshot) {
-        snapshot = next
-    }
-
     private func publish(_ next: SessionSnapshot) {
-        setState(next)
+        snapshot = next
         for continuation in subscribers.values {
             continuation.yield(next)
         }
@@ -632,14 +713,13 @@ public actor DictationCoordinator {
     /// - May this run publish? Only while it still owns the coordinator's state. A cancelled
     ///   session was published as `.cancelled` the moment the user asked, and a superseded one
     ///   does not own the snapshot at all.
-    /// - Must it release the device? Unless a newer session has already taken it over.
+    /// - Must it release the device? Only if it still holds it. A run cancelled before it
+    ///   ever claimed the microphone has nothing to release, and releasing anyway would land
+    ///   on whichever session takes the device next.
     /// - Must it clean up and account for itself? Always.
     private func finalize(_ run: SessionRun) async {
         var run = run
         let ownsPublishedState = active?.generation == run.generation
-        // Strictly newer, so a session the user cancelled — which leaves no successor — still
-        // releases the microphone it opened.
-        let deviceTakenByNewerSession = active.map { $0.generation > run.generation } ?? false
 
         if ownsPublishedState {
             active = nil
@@ -668,46 +748,61 @@ public actor DictationCoordinator {
         // cannot read it too early.
         let record = run.insertion != nil ? run.context.map { makeRecord(run, context: $0) } : nil
 
-        // No clip means capture never reached a clean stop, so the device is released here.
-        // A clip means capture already stopped, and cancelling it would be a redundant call.
-        let historyWriteFailed = await release(
-            clip: run.clip,
-            releasingDevice: run.clip == nil && !deviceTakenByNewerSession,
-            record: record
-        )
+        // Still holding the microphone means capture never reached a clean stop, so the
+        // device is released here. A run that handed over a clip already let it go, and
+        // cancelling then would be a call on somebody else's recording.
+        //
+        // Started before this function suspends for the first time, so a session that begins
+        // while the release runs is guaranteed to see the device as taken and wait.
+        let deviceRelease = captureOwner == run.generation ? Task { [capture = dependencies.capture] in
+            await capture.cancel()
+        } : nil
+
+        await deviceRelease?.value
+        releaseCaptureOwnership(run.generation)
+
+        let historyWriteFailed = await storeAndDiscard(clip: run.clip, record: record)
         if historyWriteFailed {
             run.fallbacks.append(.historyUnavailable)
         }
 
-        if ownsPublishedState, reachedTerminal {
-            publish(makeSnapshot(phase: terminal, run: run))
+        // The terminal state is published while the session on screen is still this one and
+        // nothing newer has started. Two paths arrive here. A session the coordinator still
+        // owned publishes its terminal phase for the first time. A cancelled one was already
+        // published the moment the user asked — before the insertion that was in flight came
+        // back, and before its history was written — so this refreshes it, which is what lets
+        // the user still see what happened to text that may be in their document.
+        //
+        // Both are re-checked now rather than trusted from the top, because the cleanup above
+        // suspends: a session started meanwhile owns the published state, including one that
+        // has already finished, which is why the snapshot is checked and not merely `active`.
+        // Requiring `active == nil` also keeps this out of a newer session's pre-freeze
+        // window, where the snapshot still reads as this one's and an observer event could
+        // move the focus that session is about to capture.
+        if reachedTerminal, active == nil, snapshot.sessionID == run.id {
+            let terminalSnapshot = makeSnapshot(phase: terminal, run: run)
+            // A cancellation has already shown this phase. Republishing is worth an
+            // observer's attention only when the run finished with something new to say.
+            if terminalSnapshot != snapshot {
+                publish(terminalSnapshot)
+            }
         }
         dependencies.metrics.record(makeMetrics(run))
     }
 
-    /// Releases a finished session's resources and writes its history entry, reporting whether
-    /// that write was lost.
+    /// Discards the clip and writes the history entry, reporting whether that write was lost.
     ///
     /// Runs in an unstructured task, which does not inherit cancellation, because `finalize`
-    /// runs inside the session's own task: for a cancelled session every call here would
-    /// otherwise start out cancelled, and a store or a disk-backed clip that honours
-    /// cancellation — as most file and database APIs do — would silently skip its work.
-    /// Awaiting the task keeps the ordering deterministic: nothing observes the terminal
-    /// snapshot before the device is released and the record is written.
-    private func release(
-        clip: (any AudioClip)?,
-        releasingDevice: Bool,
-        record: SessionRecord?
-    ) async -> Bool {
-        let dependencies = self.dependencies
+    /// runs inside the session's own task: for a cancelled session both calls would otherwise
+    /// start out cancelled, and a store or a disk-backed clip that honours cancellation — as
+    /// most file and database APIs do — would silently skip its work.
+    private func storeAndDiscard(clip: (any AudioClip)?, record: SessionRecord?) async -> Bool {
+        let history = dependencies.history
         return await Task {
-            if releasingDevice {
-                await dependencies.capture.cancel()
-            }
             await clip?.discard()
             guard let record else { return false }
             do {
-                try await dependencies.history.record(record)
+                try await history.record(record)
                 return false
             } catch {
                 // A failed write never downgrades a dictation that already delivered: the text

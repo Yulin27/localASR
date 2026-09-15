@@ -13,6 +13,7 @@ actor FakeAudioClip: AudioClip {
     private let samples: [Float]
     private(set) var discardCount = 0
     private(set) var loadCount = 0
+    private var discardGate: Gate?
 
     init(frameCount: Int = 16_000, sampleRate: Double = 16_000) {
         metadata = AudioClipMetadata(sampleRate: sampleRate, frameCount: frameCount)
@@ -24,8 +25,14 @@ actor FakeAudioClip: AudioClip {
         return AudioSamples(samples: samples, sampleRate: metadata.sampleRate)
     }
 
+    /// Holds `discard()` open, for proving what does — and does not — wait on clip disposal.
+    func setDiscardGate(_ gate: Gate?) {
+        discardGate = gate
+    }
+
     func discard() async {
         discardCount += 1
+        await discardGate?.arriveAndWait()
     }
 }
 
@@ -35,6 +42,8 @@ actor FakeAudioCapturing: AudioCapturing {
     }
 
     private(set) var events: [Event] = []
+    /// Releases that ran to completion, as opposed to ``Event/cancel`` which records entry.
+    private(set) var completedCancels = 0
     let clip: FakeAudioClip
 
     var prepareResponse: FakeResponse<Void> = .ok
@@ -44,6 +53,9 @@ actor FakeAudioCapturing: AudioCapturing {
     private let prepareLatch: Latch?
     private let startLatch: Latch?
     private let stopLatch: Latch?
+    private var cancelGate: Latch?
+    private var startGate: Gate?
+    private var stopGate: Gate?
 
     init(
         clip: FakeAudioClip,
@@ -75,23 +87,47 @@ actor FakeAudioCapturing: AudioCapturing {
         _ = try prepareResponse.resolve()
     }
 
+    /// Holds `start()` open across a cancellation, unlike the boundary latch, which releases
+    /// on cancel. For proving what the coordinator does while the device is still busy with a
+    /// session the user has already given up on.
+    func setStartGate(_ gate: Gate?) {
+        startGate = gate
+    }
+
     func start() async throws {
         events.append(.start)
         await startLatch?.arriveAndWait()
+        await startGate?.arriveAndWait()
         _ = try startResponse.resolve()
+    }
+
+    /// Holds `stop()` open across a cancellation, like ``setStartGate(_:)``.
+    func setStopGate(_ gate: Gate?) {
+        stopGate = gate
     }
 
     func stop() async throws -> any AudioClip {
         events.append(.stop)
         await stopLatch?.arriveAndWait()
+        await stopGate?.arriveAndWait()
         _ = try stopResponse.resolve()
         return clip
     }
 
-    /// Deliberately not latch-gated: it is a cleanup call, and parking it would deadlock
-    /// teardown.
+    /// Deliberately outside the shared boundary latches: it is a cleanup call, and parking it
+    /// with them would deadlock teardown. A test that needs to hold the device release open —
+    /// to prove a later session waits for it rather than racing it — installs a gate here and
+    /// opens it itself.
+    func setCancelGate(_ latch: Latch?) {
+        cancelGate = latch
+    }
+
     func cancel() async {
         events.append(.cancel)
+        await cancelGate?.arriveAndWait()
+        // Counted after the gate, so a test can tell a release that has been *entered* from
+        // one that has actually finished releasing the device.
+        completedCancels += 1
     }
 
     var cancelCount: Int { events.count(where: { $0 == .cancel }) }
@@ -307,8 +343,11 @@ actor FakeSettingsProvider: DictationSettingsProviding {
 
 actor FakeHistoryStore: HistoryStoring {
     private(set) var records: [SessionRecord] = []
+    /// Writes entered, whether or not they finished. A test that parks a write needs to know
+    /// it has been entered without waiting for a record that is not coming yet.
+    private(set) var attempts = 0
     var writeError: Error?
-    private let latch: Latch?
+    private var latch: Latch?
 
     init(latch: Latch? = nil) {
         self.latch = latch
@@ -318,9 +357,16 @@ actor FakeHistoryStore: HistoryStoring {
         writeError = error
     }
 
+    /// Parks every write until the gate is opened, so a test can hold a session's cleanup open
+    /// and prove the coordinator stays usable meanwhile.
+    func setWriteGate(_ latch: Latch?) {
+        self.latch = latch
+    }
+
     /// Honours cancellation, as a store doing file or database I/O would. A store that ignored
     /// it would hide a record written from a cancelled task and silently dropped.
     func record(_ record: SessionRecord) async throws {
+        attempts += 1
         await latch?.arriveAndWait()
         try Task.checkCancellation()
         if let writeError { throw writeError }
