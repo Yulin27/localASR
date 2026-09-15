@@ -223,7 +223,9 @@ public actor DictationCoordinator {
         // Nothing may start now, so anything still waiting for the microphone is waiting
         // for a turn it will never take.
         wakeCaptureWaiters()
-        snapshot = .idle
+        // Not published: every stream ends below. A caller that reads it afterwards learns that
+        // nothing it sends will be acted on.
+        snapshot = SessionSnapshot.idle.accepting(.nothing)
         for continuation in subscribers.values {
             continuation.finish()
         }
@@ -312,6 +314,11 @@ public actor DictationCoordinator {
     /// A session publishes nothing until it has frozen its destination, so until then the
     /// snapshot still belongs to the previous one. Such a session is reported as `preparing`,
     /// which is exactly what it is doing.
+    ///
+    /// That window is also the one place the published ``AcceptedActions`` lag behind: they
+    /// still describe the previous session, because publishing anything for this one would
+    /// break the freeze (ADR 0003 §5). An action sent then is decided here, against the
+    /// session actually in flight (ADR 0005).
     private func phase(of session: ActiveSession) -> DictationPhase {
         snapshot.sessionID == session.id ? snapshot.phase : .preparing
     }
@@ -725,9 +732,7 @@ public actor DictationCoordinator {
 
         closeTiming(for: current, run: &run)
         run.phase = phase
-        let next = makeSnapshot(phase: phase, run: run)
-        publish(next)
-        return next
+        return publish(makeSnapshot(phase: phase, run: run))
     }
 
     /// Closes `phase`'s stage timing, at `at` when the moment is already known.
@@ -758,11 +763,64 @@ public actor DictationCoordinator {
         )
     }
 
-    private func publish(_ next: SessionSnapshot) {
-        snapshot = next
+    /// Publishes `next`, stamped with what the coordinator accepts once it is current.
+    ///
+    /// Every snapshot goes through here, so no observer can see a phase without the actions
+    /// that go with it.
+    @discardableResult
+    private func publish(_ next: SessionSnapshot) -> SessionSnapshot {
+        let stamped = stamped(next)
+        snapshot = stamped
         for continuation in subscribers.values {
-            continuation.yield(next)
+            continuation.yield(stamped)
         }
+        return stamped
+    }
+
+    /// Returns `candidate` stamped with what this coordinator would accept were it current.
+    private func stamped(_ candidate: SessionSnapshot) -> SessionSnapshot {
+        candidate.accepting(acceptedActions(showing: candidate))
+    }
+
+    /// What ``handle(_:)`` would do while `shown` is the published snapshot.
+    ///
+    /// Mirrors the action handlers, and reads the same state they do: `toggleRecording` and
+    /// `cancel` decide from the session in flight, and `dismiss` from the published phase. It
+    /// is recomputed whenever that state changes in a way observers could act on — see
+    /// `refreshAcceptedActions()` for the one change that publishes no new phase.
+    private func acceptedActions(showing shown: SessionSnapshot) -> AcceptedActions {
+        guard !isShutDown else { return .nothing }
+
+        let toggle: AcceptedActions.Toggle
+        if let session = active {
+            // As in `phase(of:)`, but against the snapshot about to be shown.
+            let phase = shown.sessionID == session.id ? shown.phase : .preparing
+            switch phase {
+            case .preparing, .recording: toggle = .stop
+            default: toggle = .ignored
+            }
+        } else {
+            toggle = .start
+        }
+
+        return AcceptedActions(
+            toggle: toggle,
+            cancel: active != nil,
+            dismiss: shown.phase.isTerminal
+        )
+    }
+
+    /// Republishes the current snapshot, same phase and same session, if what the coordinator
+    /// accepts no longer matches what it says.
+    ///
+    /// Needed only where coordinator state changes without a phase change. A finished session
+    /// lets go of `active` before its cleanup suspends, and until the terminal snapshot
+    /// follows the history write, the snapshot on screen would still offer Stop or Cancel for
+    /// a session the coordinator has already let go of.
+    private func refreshAcceptedActions() {
+        let current = stamped(snapshot)
+        guard current != snapshot else { return }
+        publish(current)
     }
 
     // MARK: - Completion
@@ -788,6 +846,11 @@ public actor DictationCoordinator {
         if ownsPublishedState {
             active = nil
             stopSignal = nil
+            // In the same actor step, before the cleanup below suspends: from here on an
+            // activation starts a new session and a cancel does nothing, and the snapshot on
+            // screen has to say so now rather than after the history write. The phase is left
+            // alone, so ADR 0003's guarantee that the terminal phase follows that write holds.
+            refreshAcceptedActions()
         }
 
         // Taken now, before anything suspends, and removed in the same step: the session
@@ -849,7 +912,7 @@ public actor DictationCoordinator {
         // window, where the snapshot still reads as this one's and an observer event could
         // move the focus that session is about to capture.
         if reachedTerminal, active == nil, snapshot.sessionID == run.id {
-            let terminalSnapshot = makeSnapshot(phase: terminal, run: run)
+            let terminalSnapshot = stamped(makeSnapshot(phase: terminal, run: run))
             // A cancellation has already shown this phase. Republishing is worth an
             // observer's attention only when the run finished with something new to say.
             if terminalSnapshot != snapshot {

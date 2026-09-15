@@ -30,6 +30,10 @@ struct CoordinatorLifecycleTests {
 
         #expect(phases == [
             .idle, .preparing, .recording, .transcribing, .normalizing, .refining, .inserting,
+            // A same-phase refresh: the coordinator lets the session go before its cleanup
+            // suspends, and publishes that it would now start a new one (ADR 0005). The
+            // terminal phase still follows the history write.
+            .inserting,
             .completed,
         ])
     }

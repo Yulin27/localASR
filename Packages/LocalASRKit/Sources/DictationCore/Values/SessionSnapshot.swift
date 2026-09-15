@@ -116,6 +116,13 @@ public struct SessionSnapshot: Sendable, Equatable {
     /// Non-fatal degradations, in the order they happened.
     public let fallbacks: [FallbackReason]
 
+    /// What the coordinator accepts while this snapshot is current.
+    ///
+    /// Stamped by the coordinator from its own state each time it publishes, so a command
+    /// shown from it agrees with what the coordinator will do. Views read it; they never
+    /// derive it from ``phase``. See ADR 0005 for the one window in which it can lag.
+    public let acceptedActions: AcceptedActions
+
     public init(
         phase: DictationPhase,
         sessionID: SessionID? = nil,
@@ -125,7 +132,8 @@ public struct SessionSnapshot: Sendable, Equatable {
         refinement: RefinementSummary? = nil,
         insertion: InsertionOutcome? = nil,
         failure: DictationFailure? = nil,
-        fallbacks: [FallbackReason] = []
+        fallbacks: [FallbackReason] = [],
+        acceptedActions: AcceptedActions? = nil
     ) {
         self.sessionID = sessionID
         self.phase = phase
@@ -136,6 +144,7 @@ public struct SessionSnapshot: Sendable, Equatable {
         self.insertion = insertion
         self.failure = failure
         self.fallbacks = fallbacks
+        self.acceptedActions = acceptedActions ?? AcceptedActions(settledIn: phase)
     }
 
     public static let idle = SessionSnapshot(phase: .idle)
@@ -155,7 +164,26 @@ public struct SessionSnapshot: Sendable, Equatable {
             refinement: refinement,
             insertion: insertion,
             failure: failure,
-            fallbacks: fallbacks
+            fallbacks: fallbacks,
+            acceptedActions: acceptedActions
+        )
+    }
+
+    /// Returns a copy that accepts `actions`, and is otherwise unchanged.
+    ///
+    /// Internal: only the coordinator knows what it accepts.
+    func accepting(_ actions: AcceptedActions) -> SessionSnapshot {
+        SessionSnapshot(
+            phase: phase,
+            sessionID: sessionID,
+            context: context,
+            audio: audio,
+            transcript: transcript,
+            refinement: refinement,
+            insertion: insertion,
+            failure: failure,
+            fallbacks: fallbacks,
+            acceptedActions: actions
         )
     }
 
@@ -174,7 +202,8 @@ public struct SessionSnapshot: Sendable, Equatable {
             refinement: refinement,
             insertion: insertion,
             failure: failure,
-            fallbacks: fallbacks
+            fallbacks: fallbacks,
+            acceptedActions: acceptedActions
         )
     }
 }

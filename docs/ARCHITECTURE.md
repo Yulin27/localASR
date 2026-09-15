@@ -167,6 +167,15 @@ make the sequence of phases unobservable, and a session produces only a handful 
 snapshots. `shutdown()` terminates every stream explicitly, because an actor's `deinit`
 runs outside its isolation and cannot touch the subscriber list.
 
+Each snapshot carries `acceptedActions`: what `toggleRecording` would do (start, stop, or
+nothing), and whether `cancel` and `dismiss` apply. The coordinator stamps it from its own
+state when it publishes, and views render commands from it rather than from the phase,
+because the two diverge while a finished session cleans up. Clearing the in-flight session
+publishes a same-phase refresh, so observers must tolerate a snapshot whose phase and session
+repeat the previous one. The only window in which the published actions lag is a new
+session's pre-freeze window, where nothing may be published; an action sent then is still
+decided against the session actually in flight. See ADR 0005.
+
 Snapshots never carry the audio clip, only `AudioClipMetadata`. The clip is owned by the
 session and released in the coordinator's finalize path on **every** route out of a session,
 including the one where a late adapter returns after its session was superseded.
