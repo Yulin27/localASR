@@ -216,9 +216,18 @@ public struct RefinementOutputGuard: Sendable {
             return true
         }
         let inputHead = normalizedOpening(input)
-        return normalizedPreamblePhrases.contains { phrase in
-            opensWith(head, phrase) && !opensWith(inputHead, phrase)
+        for phrase in normalizedPreamblePhrases where opensWith(head, phrase) {
+            guard opensWith(inputHead, phrase) else { return true }
+
+            // The speaker did open this way, but framing tucked in behind their own opener
+            // is still framing: "sure send it" does not license "Sure, here is the corrected
+            // text: send it".
+            let afterPhrase = head.dropFirst(phrase.count).drop { $0 == " " }
+            if namesTheTranscript(String(afterPhrase)) {
+                return true
+            }
         }
+        return false
     }
 
     /// Whether a normalized opening introduces the transcript by name.

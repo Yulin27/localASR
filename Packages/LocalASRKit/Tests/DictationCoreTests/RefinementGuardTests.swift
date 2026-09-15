@@ -167,7 +167,7 @@ struct RefinementGuardTests {
             ("here is the revised schedule for next week", "Here is the revised schedule for next week."),
             ("here is the corrected invoice total", "Here is the corrected invoice total."),
             ("here is the revised textbook chapter", "Here is the revised textbook chapter."),
-            ("here is the updated versioning policy", "Here is the updated versioning policy."),
+            ("here is the revised versioning policy", "Here is the revised versioning policy."),
             ("以下是修改后的计划我们先确认范围", "以下是修改后的计划，我们先确认范围。"),
             ("voici le document corrigé que tu voulais", "Voici le document corrigé que tu voulais."),
         ]
@@ -177,6 +177,25 @@ struct RefinementGuardTests {
         // talking about their schedule, their invoice, their plan. Only naming the text
         // itself makes it a sentence about the transcript rather than the transcript.
         #expect(evaluate(output, input: input, mode: .message) == .accepted(output))
+    }
+
+    @Test(
+        "Framing tucked in behind the speaker's own opener is still framing",
+        arguments: [
+            ("sure send it tonight", "Sure, here is the corrected text: send it tonight."),
+            ("of course send it tonight", "Of course, here is a revised version: send it tonight."),
+            ("certainly send it tonight", "Certainly, here's your cleaned text: send it tonight."),
+        ]
+    )
+    func framingBehindASharedOpenerIsRejected(input: String, output: String) {
+        // The speaker did say "sure". They did not then introduce their own transcript, and
+        // matching only the very start of the output would let their opener shelter what
+        // did.
+        //
+        // English only, and not by omission: the Chinese openers on this list — 以下是,
+        // 下面是, 这是 — are themselves the introductions framing starts with, so Chinese
+        // framing appears at the start of the output and is covered above.
+        #expect(evaluate(output, input: input, mode: .message) == .rejected(.refinementPreamble))
     }
 
     @Test("A preamble written with a typographic apostrophe is still rejected")
