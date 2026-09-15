@@ -13,6 +13,7 @@ This package contains the testable product core and all infrastructure adapters.
 - `ModelManagement` depends only on `DictationCore` and `Observability`.
 - `SpeechEngines` and `TextProcessing` may additionally depend on `ModelManagement`.
 - `Persistence` depends only on `DictationCore` and `Observability`.
+- `DictationDemo` depends only on `DictationCore`. It is a separate library product, and no other package target may depend on it.
 - No package target may import or depend on the application shell.
 
 If a dependency would point in the opposite direction, introduce a value or port in `DictationCore` instead. Do not solve cycles with globals or notification broadcasts.

@@ -1,5 +1,6 @@
 import AudioCapture
 import DictationCore
+import DictationDemo
 import MacIntegration
 import ModelManagement
 import Observability
@@ -11,6 +12,7 @@ import TextProcessing
 @Test("All architecture modules are available")
 func allModulesAreAvailable() {
     _ = DictationCoreModule.self
+    _ = DictationDemoModule.self
     _ = AudioCaptureModule.self
     _ = SpeechEnginesModule.self
     _ = TextProcessingModule.self

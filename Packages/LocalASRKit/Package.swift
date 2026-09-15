@@ -20,7 +20,11 @@ let package = Package(
                 "Persistence",
                 "Observability",
             ]
-        )
+        ),
+        .library(
+            name: "DictationDemo",
+            targets: ["DictationDemo"]
+        ),
     ],
     targets: [
         .target(
@@ -61,14 +65,24 @@ let package = Package(
             dependencies: ["DictationCore", "Observability"],
             exclude: ["AGENTS.md", "CLAUDE.md"]
         ),
+        .target(
+            name: "DictationDemo",
+            dependencies: ["DictationCore"],
+            exclude: ["AGENTS.md", "CLAUDE.md"]
+        ),
         .testTarget(
             name: "DictationCoreTests",
             dependencies: ["DictationCore"]
         ),
         .testTarget(
+            name: "DictationDemoTests",
+            dependencies: ["DictationDemo", "DictationCore"]
+        ),
+        .testTarget(
             name: "ArchitectureTests",
             dependencies: [
                 "DictationCore",
+                "DictationDemo",
                 "AudioCapture",
                 "SpeechEngines",
                 "TextProcessing",
