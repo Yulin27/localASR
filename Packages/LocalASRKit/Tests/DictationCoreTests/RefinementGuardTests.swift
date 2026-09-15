@@ -159,6 +159,22 @@ struct RefinementGuardTests {
         #expect(evaluate(output, input: input, mode: .message) == .rejected(.refinementPreamble))
     }
 
+    @Test(
+        "Ordinary content that happens to describe a revision is kept",
+        arguments: [
+            ("here is the revised schedule for next week", "Here is the revised schedule for next week."),
+            ("here is the corrected invoice total", "Here is the corrected invoice total."),
+            ("以下是修改后的计划我们先确认范围", "以下是修改后的计划，我们先确认范围。"),
+            ("voici le document corrigé que tu voulais", "Voici le document corrigé que tu voulais."),
+        ]
+    )
+    func revisionWordingWithoutATranscriptNounIsKept(input: String, output: String) {
+        // An introduction and an edit word are not framing on their own — the speaker is
+        // talking about their schedule, their invoice, their plan. Only naming the text
+        // itself makes it a sentence about the transcript rather than the transcript.
+        #expect(evaluate(output, input: input, mode: .message) == .accepted(output))
+    }
+
     @Test("A preamble written with a typographic apostrophe is still rejected")
     func typographicApostrophePreambleIsRejected() {
         let body = "把消息发出去，记得告诉他我们下周再确认细节。"

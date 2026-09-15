@@ -160,37 +160,45 @@ public struct RefinementOutputGuard: Sendable {
         "voici", "voici le", "bien sûr",
     ]
 
-    /// Framing that names the transcript it is introducing.
+    /// The three parts of framing that names the transcript, in order and adjacent: an
+    /// introduction, a word for what was done to the text, and a word for the text itself.
     ///
-    /// Rejected whatever the input opens with. "Here is the cleaned version" is a sentence a
-    /// model writes *about* someone's text, not one a person dictates, so unlike the openers
-    /// above it needs no comparison with the input — and needs none, because the input
-    /// sharing a generic first word ("here is my plan") is exactly how the canonical preamble
-    /// would otherwise get through.
+    /// All three together is a sentence a model writes *about* someone's words. Any two of
+    /// them is ordinary dictation, which is why the artifact is required: "here is the
+    /// revised schedule" is a person talking about their own work, and "以下是修改后的计划"
+    /// is that same sentence in Chinese.
     ///
-    /// Deliberately the canonical set rather than an exhaustive one. A preamble that is not
-    /// listed costs a refinement nobody sees; a phrase listed too loosely costs the user
-    /// theirs, which is the more expensive mistake.
-    private static let selfReferentialFraming = [
-        "here is the cleaned", "here's the cleaned",
-        "here is the corrected", "here's the corrected",
-        "here is the revised", "here's the revised",
-        "here is the polished", "here's the polished",
-        "here is the rewritten", "here's the rewritten",
-        "以下是清理后", "以下是整理后", "以下是修改后",
-        "下面是清理后", "下面是整理后", "下面是修改后",
-        "voici le texte corrigé", "voici le texte nettoyé", "voici la version corrigée",
+    /// Latin entries carry their trailing space, because a normalized opening separates
+    /// words with one; Chinese is written without.
+    private static let framingIntroductions = [
+        "here is the ", "here's the ", "this is the ", "以下是", "下面是", "这是",
+    ]
+    private static let framingEdits = [
+        "cleaned up ", "cleaned ", "corrected ", "revised ", "polished ", "rewritten ",
+        "edited ", "tidied ", "清理后的", "整理后的", "修改后的", "润色后的", "优化后的",
+    ]
+    private static let framingArtifacts = [
+        "version", "text", "transcript", "wording", "文本", "版本", "转写", "文字",
+    ]
+
+    /// French puts the adjective after the noun, so its framing is listed rather than
+    /// composed from the three parts above.
+    private static let frenchFraming = [
+        "voici le texte corrigé", "voici le texte nettoyé", "voici le texte révisé",
+        "voici la version corrigée", "voici la version nettoyée",
     ]
 
     private static let normalizedPreamblePhrases = preamblePhrases.map(normalizedOpening)
-    private static let normalizedFraming = selfReferentialFraming.map(normalizedOpening)
+    private static let normalizedFrenchFraming = frenchFraming.map(normalizedOpening)
 
     /// Whether the output opens with assistant framing the speaker did not dictate.
     ///
     /// The phrase alone is not evidence. People open dictated messages with "sure", "voici"
     /// and "这是你" all the time, and punctuating such an opening is the refinement working,
     /// not a preamble — so an opener counts only when the input did not already start with
-    /// it. Framing that names the transcript counts either way.
+    /// it. Framing that names the transcript counts either way, which is what stops the
+    /// canonical preamble from walking through on a first word the speaker happened to use:
+    /// "here is my plan" does not license "Here is the cleaned version: …".
     ///
     /// Every matching opener is considered, not the first. They overlap, and stopping at the
     /// shortest match would clear the output on the strength of a word the speaker did say:
@@ -198,13 +206,30 @@ public struct RefinementOutputGuard: Sendable {
     /// input, while the framing that was added is "voici le".
     static func hasAssistantPreamble(_ text: String, input: String) -> Bool {
         let head = normalizedOpening(text)
-        if normalizedFraming.contains(where: { opensWith(head, $0) }) {
+        if namesTheTranscript(head) {
             return true
         }
         let inputHead = normalizedOpening(input)
         return normalizedPreamblePhrases.contains { phrase in
             opensWith(head, phrase) && !opensWith(inputHead, phrase)
         }
+    }
+
+    /// Whether a normalized opening introduces the transcript by name.
+    static func namesTheTranscript(_ head: String) -> Bool {
+        if normalizedFrenchFraming.contains(where: { head.hasPrefix($0) }) {
+            return true
+        }
+        for introduction in framingIntroductions where head.hasPrefix(introduction) {
+            let afterIntroduction = head.dropFirst(introduction.count)
+            for edit in framingEdits where afterIntroduction.hasPrefix(edit) {
+                let afterEdit = afterIntroduction.dropFirst(edit.count)
+                if framingArtifacts.contains(where: { afterEdit.hasPrefix($0) }) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     /// The opening of `text`, lowercased, with typographic apostrophes straightened and
