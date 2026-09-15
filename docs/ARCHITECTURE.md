@@ -2,7 +2,13 @@
 
 ## Status
 
-This document defines the intended v0.1 structure. The Swift targets currently contain compile-safe placeholders only. Runtime APIs should be introduced incrementally through tested vertical slices.
+This document defines the intended v0.1 structure.
+
+`DictationCore` is implemented: the domain values, the port protocols, the refinement output
+guard, and the `DictationCoordinator` all exist and are covered by tests that run against
+fakes with no microphone, Accessibility permission, network, or model. The seven adapter
+modules still contain placeholders, and no runtime API has been chosen yet. Adapter behaviour
+should be introduced incrementally through tested vertical slices.
 
 ## Architectural style
 
@@ -78,7 +84,19 @@ Any active phase -> cancelled -> idle
 Any active phase -> failed -> idle/retry
 ```
 
-Only one dictation session may be active. Each asynchronous callback carries a session ID, and stale callbacks cannot mutate current state.
+Voice activity detection shares the `.transcribing` phase. The lifecycle gives it no step of
+its own, and nothing user-visible changes between trimming silence and running recognition; a
+voice-activity failure is reported at `.transcribing`.
+
+The coordinator accepts three semantic actions — `toggleRecording`, `cancel`, and `dismiss`.
+A second activation ends recording, an activation during processing is ignored, and an
+activation from a finished session starts a new one. `handle(_:)` is synchronous: it mutates
+state and returns while the pipeline runs in a task of its own, which is what lets a
+cancellation arrive while a long recognition call is still in flight.
+
+Only one dictation session may be active. Every phase change goes through a single choke point
+that rejects a run whose session was superseded or whose task was cancelled, so a late
+adapter result cannot mutate current state even when the adapter ignores cancellation.
 
 Shortcut input is debounced at the adapter boundary. Keyboard auto-repeat and modifier/key release events cannot start, stop, or create duplicate sessions.
 
@@ -95,10 +113,10 @@ The following context is captured at recording start and remains fixed:
 
 | Module | Owns | Must not own |
 |---|---|---|
-| `DictationCore` | Domain values, port protocols, state machine, orchestration, fallback policy | UI, AppKit, AVFoundation, ML runtimes, persistence implementation |
+| `DictationCore` | Domain values, port protocols, state machine, orchestration, fallback policy, refinement output validation | UI, AppKit, AVFoundation, ML runtimes, persistence implementation |
 | `AudioCapture` | Microphone lifecycle, PCM conversion, bounded or disk-backed long recording, audio buffers, VAD adapter | ASR selection, text processing, UI state |
 | `SpeechEngines` | ASR provider adapters and provider result mapping | Recording, refinement, insertion, settings UI |
-| `TextProcessing` | Ordered deterministic transforms, local refiner adapters, output guards | Audio, hotkeys, clipboard |
+| `TextProcessing` | Ordered deterministic transforms, local refiner adapters, thinking/preamble cleanup inside those adapters | Audio, hotkeys, clipboard, output validation (the guard is core-owned) |
 | `MacIntegration` | Hotkeys, application/target capture, AX insertion, pasteboard transaction, permissions, login item | Product pipeline policy |
 | `ModelManagement` | Model manifest, pinned revisions, download, verification, preparation, cache/residency | Provider selection UI or dictation orchestration |
 | `Persistence` | Preferences and recent-history implementations, migrations | UI and pipeline decisions |
@@ -107,22 +125,51 @@ The following context is captured at recording start and remains fixed:
 
 `DictationCore` is the stable center. Infrastructure implements its ports. The application constructs concrete adapters and injects them into the coordinator.
 
-## Planned ports
+## Ports
 
-The first core pass should define only capabilities required by the v0.1 pipeline:
+The capabilities the v0.1 pipeline needs, all defined in `DictationCore`:
 
-- `AudioCapturing`
-- `VoiceActivityDetecting`
-- `SpeechRecognizing`
-- `DeterministicTextProcessing`
-- `TextRefining`
-- `TextInserting`
-- `ActiveApplicationProviding`
-- `ModeResolving`
-- `HistoryStoring`
-- `MetricsRecording`
+| Port | Note |
+|---|---|
+| `AudioCapturing` | `prepare()` warms the capture path; the coordinator calls it during `preparing`. |
+| `VoiceActivityDetecting` | Returns a frame range into the existing clip, not a second clip. |
+| `SpeechRecognizing` | Batch. An adapter may chunk internally and still return one result. |
+| `DeterministicTextProcessing` | Always runs. Receives the mode, because punctuation and list handling are mode-dependent. |
+| `TextRefining` | Returns unvalidated output; see the guard below. |
+| `TextInserting` | Never throws. Delivery is reported through a structured outcome. |
+| `ActiveApplicationProviding` | Never throws. A missing permission degrades delivery rather than aborting a recording. |
+| `ModeResolving` | Synchronous and pure, so a mode can be resolved and frozen before focus changes. |
+| `HistoryStoring` | Storage backend is a later decision. |
+| `MetricsRecording` | Non-throwing. Receives counts, durations, and categories, never text. |
+| `DictationSettingsProviding` | Supplies the language hint, default mode, and refinement toggle that the session freezes. |
+| `TimeSource` | Wall-clock and monotonic readings together, so timings are testable without sleeping. |
 
-Streaming recognition and streaming insertion are separate future capabilities. They should not inflate the batch protocols.
+Two capabilities are deliberately *not* ports:
+
+- **The refinement output guard** is a concrete core type configured by a
+  `RefinementGuardPolicy` value. It sits outside `TextRefining` so a model adapter cannot
+  certify its own output, and it is not a protocol so no composition root can install a
+  weaker rule set. Only the per-mode thresholds vary.
+- **Session identity** arrives as an injected `SessionIDGenerator` rather than a port,
+  because it is a value source rather than a capability with behaviour.
+
+Streaming recognition and streaming insertion are separate future capabilities. They should
+not inflate the batch protocols.
+
+## Observing the coordinator
+
+`DictationCoordinator` exposes `currentSnapshot()` for a synchronous read and
+`snapshots() -> AsyncStream<SessionSnapshot>` for observation. Each call to `snapshots()`
+returns a stream of its own, so several views observe independently, and the current
+snapshot is delivered on subscribe so a late observer never renders a stale state. The
+buffer is unbounded: dropping to the newest snapshot would be fine for rendering but would
+make the sequence of phases unobservable, and a session produces only a handful of small
+snapshots. `shutdown()` terminates every stream explicitly, because an actor's `deinit`
+runs outside its isolation and cannot touch the subscriber list.
+
+Snapshots never carry the audio clip, only `AudioClipMetadata`. The clip is owned by the
+session and released in the coordinator's finalize path on **every** route out of a session,
+including the one where a late adapter returns after its session was superseded.
 
 ## Text representation
 
@@ -190,7 +237,7 @@ Production logs contain identifiers, durations, sizes, phases, and error categor
 4. Manual compatibility tests across the product matrix.
 5. Performance runs recording P50/P95 stage latency, peak memory, model load time, and insertion outcome.
 
-The coordinator must be tested with fakes before real model integration. Cancellation and failure are tested at every await boundary.
+The coordinator must be tested with fakes before real model integration. Cancellation and failure are tested at every await boundary. This is implemented: `DictationCoreTests` drives complete sessions against deterministic fakes with an injected clock, including a cancellation parked at each of the ten await boundaries, an adapter that ignores cancellation, and the full fallback matrix.
 
 ## Repository layout
 

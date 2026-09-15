@@ -1,0 +1,988 @@
+<title>听写内核契约</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --ground: #f5f6f9;
+    --surface: #ffffff;
+    --surface-2: #eceef4;
+    --ink: #171a21;
+    --ink-2: #4a5162;
+    --ink-3: #767e91;
+    --rule: #dde1ea;
+    --rule-strong: #c3c9d6;
+    --accent: #2b3a8f;
+    --accent-soft: #e6e9f7;
+    --abort: #b23a26;
+    --abort-soft: #f8e8e4;
+    --ok: #1c6e58;
+    --ok-soft: #e2f0eb;
+
+    --serif: "Noto Serif SC", "Songti SC", "Source Han Serif SC", "SimSun", serif;
+    --sans: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+    --measure: 68ch;
+    --radius: 6px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #101218;
+      --surface: #171a22;
+      --surface-2: #1e222c;
+      --ink: #e8eaf0;
+      --ink-2: #a7aec0;
+      --ink-3: #7b8397;
+      --rule: #2a2f3b;
+      --rule-strong: #3a4150;
+      --accent: #93a4f0;
+      --accent-soft: #1d2340;
+      --abort: #f08a72;
+      --abort-soft: #33201b;
+      --ok: #6fc7aa;
+      --ok-soft: #16302a;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #101218;
+    --surface: #171a22;
+    --surface-2: #1e222c;
+    --ink: #e8eaf0;
+    --ink-2: #a7aec0;
+    --ink-3: #7b8397;
+    --rule: #2a2f3b;
+    --rule-strong: #3a4150;
+    --accent: #93a4f0;
+    --accent-soft: #1d2340;
+    --abort: #f08a72;
+    --abort-soft: #33201b;
+    --ok: #6fc7aa;
+    --ok-soft: #16302a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding-inline: 20px;
+    padding-block: 0 96px;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.85;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .page {
+    max-width: 1060px;
+    margin-inline: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 72px;
+  }
+
+  .prose {
+    max-width: var(--measure);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  p { margin: 0; }
+
+  a {
+    color: var(--accent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+  a:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    padding-block: 80px 40px;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: clamp(38px, 6.2vw, 62px);
+    line-height: 1.12;
+    letter-spacing: 0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    max-width: 58ch;
+    font-size: 18px;
+    line-height: 1.8;
+    color: var(--ink-2);
+  }
+
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+    gap: 1px;
+    margin: 12px 0 0;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .facts div {
+    background: var(--surface);
+    padding: 14px 16px 16px;
+  }
+
+  .facts dt {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    letter-spacing: 0.04em;
+  }
+
+  .facts dd {
+    margin: 2px 0 0;
+    font-family: var(--mono);
+    font-size: 24px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+
+  .facts dd span {
+    font-size: 13px;
+    color: var(--ink-3);
+    margin-inline-start: 4px;
+  }
+
+  /* ---------- sections ---------- */
+
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(25px, 3.4vw, 33px);
+    line-height: 1.35;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  h2 .topic {
+    display: block;
+    font-family: var(--mono);
+    font-weight: 400;
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+
+  h3 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 19px;
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  strong { font-weight: 700; }
+  .lead-in { color: var(--ink-2); }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+
+  /* ---------- callout ---------- */
+
+  .callout {
+    max-width: var(--measure);
+    border-inline-start: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 18px 22px;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    color: var(--ink);
+  }
+
+  .callout p + p { margin-top: 10px; }
+
+  .callout.is-abort {
+    border-inline-start-color: var(--abort);
+    background: var(--abort-soft);
+  }
+
+  /* ---------- figures ---------- */
+
+  /* Semantic color inside the diagrams is carried by `color`, so `currentColor` on the
+     strokes, fills and arrowheads resolves per theme instead of pinning a hex that only
+     reads on one ground. */
+  svg .abort-mark { color: var(--abort); }
+  svg .ok-mark { color: var(--ok); }
+
+  figure {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .figscroll { overflow-x: auto; }
+
+  figure svg {
+    display: block;
+    width: 100%;
+    min-width: 640px;
+    height: auto;
+    color: var(--ink);
+  }
+
+  figcaption {
+    max-width: var(--measure);
+    font-size: 14px;
+    line-height: 1.75;
+    color: var(--ink-3);
+  }
+
+  /* ---------- code blocks ---------- */
+
+  pre {
+    margin: 0;
+    max-width: var(--measure);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.75;
+    color: var(--ink);
+  }
+
+  pre .cmt { color: var(--ink-3); }
+  pre .kw { color: var(--accent); }
+
+  /* ---------- tables ---------- */
+
+  .tablewrap { overflow-x: auto; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 620px;
+    font-size: 14.5px;
+    line-height: 1.7;
+  }
+
+  caption {
+    text-align: start;
+    max-width: var(--measure);
+    font-size: 14px;
+    color: var(--ink-3);
+    padding-bottom: 12px;
+  }
+
+  th, td {
+    text-align: start;
+    padding: 11px 16px 11px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+
+  thead th {
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+    border-bottom-color: var(--rule-strong);
+    white-space: nowrap;
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  td.name {
+    font-family: var(--mono);
+    font-size: 13px;
+    white-space: nowrap;
+    color: var(--ink);
+  }
+
+  /* "the words survived" — the one column that carries meaning rather than data. */
+  td.ok {
+    color: var(--ok);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  /* ---------- bug list ---------- */
+
+  .bugs {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .bug {
+    background: var(--surface);
+    padding: 20px 22px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 6px 32px;
+  }
+
+  .bug h3 { grid-column: 1 / -1; }
+
+  .bug .symptom { color: var(--ink-2); }
+
+  .bug .fix {
+    color: var(--ink-2);
+    border-inline-start: 2px solid var(--ok);
+    padding-inline-start: 16px;
+  }
+
+  .bug .fix b {
+    color: var(--ok);
+    font-weight: 500;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    letter-spacing: 0.06em;
+    display: block;
+    margin-bottom: 2px;
+  }
+
+  .bug .symptom b {
+    color: var(--abort);
+    font-weight: 500;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    letter-spacing: 0.06em;
+    display: block;
+    margin-bottom: 2px;
+  }
+
+  /* ---------- file map ---------- */
+
+  .filemap {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .filemap div {
+    background: var(--surface);
+    padding: 14px 18px 16px;
+  }
+
+  .filemap .path {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--accent);
+    word-break: break-all;
+  }
+
+  .filemap .what {
+    font-size: 14px;
+    color: var(--ink-2);
+    margin-top: 4px;
+  }
+
+  /* ---------- steps ---------- */
+
+  ol.steps {
+    max-width: var(--measure);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  ol.steps li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+  }
+
+  ol.steps li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--accent);
+    padding-top: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- footer ---------- */
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: var(--measure);
+    color: var(--ink-2);
+    font-size: 14.5px;
+  }
+
+  @media (max-width: 620px) {
+    body { font-size: 15.5px; }
+    .masthead { padding-block: 52px 32px; }
+    .page { gap: 52px; }
+    .bug { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+    .bug .fix { padding-inline-start: 14px; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <p class="eyebrow">localASR · Phase 1</p>
+    <h1>听写内核契约</h1>
+    <p class="standfirst">
+      这一层没有任何用户看得见的功能。它写下的是契约：会话由谁推进、失败时退到哪里、
+      以及哪一条路径上都绝不能弄丢用户刚说的话。
+    </p>
+    <dl class="facts">
+      <div><dt>测试</dt><dd>100 <span>个 / 13 套</span></dd></div>
+      <div><dt>编译警告</dt><dd>0 <span>严格并发</span></dd></div>
+      <div><dt>端口</dt><dd>12</dd></div>
+      <div><dt>阶段</dt><dd>10</dd></div>
+      <div><dt>内核依赖</dt><dd>Foundation <span>仅此</span></dd></div>
+    </dl>
+  </header>
+
+  <section>
+    <h2><span class="topic">为什么</span>先写一层没人看得见的代码</h2>
+    <div class="prose">
+      <p>
+        后面几个阶段要接麦克风、辅助功能权限、ASR 模型、本地 LLM。这些 API 会变、会换实现、
+        会被重写一遍。如果听写的流程本身和它们长在一起，每换一次运行时就要把流程重写一次。
+      </p>
+      <p>
+        所以先把两件事拆开：<strong>流程</strong>只描述「我需要什么能力」，
+        <strong>适配器</strong>负责「这个能力具体怎么实现」。
+        <code>DictationCore</code> 里只有前者。
+      </p>
+      <p>
+        判断这一层做完了没有，标准只有一条：<strong>没有麦克风、没有权限、没有网络、没有模型权重，
+        完整流程也能端到端跑通。</strong>现在它可以了 —— 全部 100 个测试都是这么跑的。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="topic">形状</span>一次听写经过什么</h2>
+
+    <figure>
+      <div class="figscroll">
+        <svg viewBox="0 0 940 300" role="img" aria-label="一次听写的数据流：从麦克风采集，依次经过静音裁剪、识别、确定性处理、润色、输出守卫、插入，其中识别产出 rawText，确定性处理产出 normalizedText，润色产出 finalText；润色被拒绝或失败时，直接用 normalizedText 插入。">
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,1 10,5 0,9" fill="currentColor" />
+            </marker>
+            <marker id="ar-abort" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,1 10,5 0,9" class="abort-mark" fill="currentColor" />
+            </marker>
+          </defs>
+
+          <!-- stage boxes -->
+          <g fill="none" stroke="currentColor" stroke-opacity="0.28">
+            <rect x="20"  y="60" width="126" height="58" rx="5" />
+            <rect x="168" y="60" width="126" height="58" rx="5" />
+            <rect x="316" y="60" width="126" height="58" rx="5" />
+            <rect x="464" y="60" width="126" height="58" rx="5" />
+            <rect x="612" y="60" width="126" height="58" rx="5" />
+            <rect x="760" y="60" width="126" height="58" rx="5" />
+          </g>
+
+          <!-- arrows between stages -->
+          <g stroke="currentColor" stroke-opacity="0.45" stroke-width="1.4" marker-end="url(#ar)">
+            <line x1="146" y1="89" x2="164" y2="89" />
+            <line x1="294" y1="89" x2="312" y2="89" />
+            <line x1="442" y1="89" x2="460" y2="89" />
+            <line x1="590" y1="89" x2="608" y2="89" />
+            <line x1="738" y1="89" x2="756" y2="89" />
+          </g>
+
+          <!-- stage titles -->
+          <g font-family="'Noto Sans SC', sans-serif" font-size="14" fill="currentColor" text-anchor="middle">
+            <text x="83"  y="84">麦克风采集</text>
+            <text x="231" y="84">静音裁剪</text>
+            <text x="379" y="84">语音识别</text>
+            <text x="527" y="84">确定性处理</text>
+            <text x="675" y="84">本地润色</text>
+            <text x="823" y="84">写入光标</text>
+          </g>
+
+          <!-- port names -->
+          <g font-family="'JetBrains Mono', monospace" font-size="10" fill="currentColor" fill-opacity="0.52" text-anchor="middle">
+            <text x="83"  y="105">AudioCapturing</text>
+            <text x="231" y="105">VoiceActivity</text>
+            <text x="379" y="105">SpeechRecognizing</text>
+            <text x="527" y="105">TextProcessing</text>
+            <text x="675" y="105">TextRefining</text>
+            <text x="823" y="105">TextInserting</text>
+          </g>
+
+          <!-- text stage ticks -->
+          <g stroke="currentColor" stroke-opacity="0.25" stroke-dasharray="3 3">
+            <line x1="379" y1="118" x2="379" y2="170" />
+            <line x1="527" y1="118" x2="527" y2="170" />
+            <line x1="675" y1="118" x2="675" y2="170" />
+          </g>
+
+          <!-- text stage chips -->
+          <g fill="currentColor" fill-opacity="0.06" stroke="currentColor" stroke-opacity="0.22">
+            <rect x="316" y="170" width="126" height="32" rx="5" />
+            <rect x="464" y="170" width="126" height="32" rx="5" />
+            <rect x="612" y="170" width="126" height="32" rx="5" />
+          </g>
+          <g font-family="'JetBrains Mono', monospace" font-size="11.5" fill="currentColor" fill-opacity="0.78" text-anchor="middle">
+            <text x="379" y="191">rawText</text>
+            <text x="527" y="191">normalizedText</text>
+            <text x="675" y="191">finalText</text>
+          </g>
+
+          <!-- fallback route -->
+          <path d="M 675 60 L 675 30 L 823 30 L 823 56" fill="none" class="abort-mark" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ar-abort)" />
+          <text x="749" y="22" font-family="'Noto Sans SC', sans-serif" font-size="12" class="abort-mark" fill="currentColor" text-anchor="middle">被拒绝或失败 → 用 normalizedText</text>
+
+          <!-- caption inside figure -->
+          <text x="20" y="248" font-family="'Noto Sans SC', sans-serif" font-size="12.5" fill="currentColor" fill-opacity="0.6">录音数据只活在协调器内部，从不进入状态快照。快照里只有 AudioClipMetadata。</text>
+          <text x="20" y="272" font-family="'Noto Sans SC', sans-serif" font-size="12.5" fill="currentColor" fill-opacity="0.6">原始文本一旦产生就不会被覆盖：后面任何一步失败，都只是退回到更早的那个值。</text>
+        </svg>
+      </div>
+      <figcaption>
+        每个方框是一个端口，由后面的阶段（Phase 3–8）提供真实实现。虚线是唯一一条「往回退」的路：
+        润色结果被拒绝或失败时，最终文本退回确定性处理的输出。
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="topic">状态机</span>十个阶段，一个推进者</h2>
+    <div class="prose">
+      <p>
+        会话只有一条前进路线。任何进行中的阶段都可以取消或失败，两者都进入终止态；
+        终止态会停在那里等着，直到用户关掉它，或者再按一次快捷键开始新的会话。
+      </p>
+    </div>
+
+    <figure>
+      <div class="figscroll">
+        <svg viewBox="0 0 940 300" role="img" aria-label="会话状态机：空闲、准备、录音、转写、规范化、润色、插入依次推进到完成；任一进行中的阶段都可以取消或失败；终止态可以回到空闲或开始新会话。">
+          <defs>
+            <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,1 10,5 0,9" fill="currentColor" />
+            </marker>
+            <marker id="ar2-abort" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,1 10,5 0,9" class="abort-mark" fill="currentColor" />
+            </marker>
+          </defs>
+
+          <!-- phase boxes -->
+          <g fill="none" stroke="currentColor" stroke-opacity="0.28">
+            <rect x="14"  y="46" width="100" height="52" rx="5" />
+            <rect x="130" y="46" width="100" height="52" rx="5" />
+            <rect x="246" y="46" width="100" height="52" rx="5" />
+            <rect x="362" y="46" width="100" height="52" rx="5" />
+            <rect x="478" y="46" width="100" height="52" rx="5" />
+            <rect x="594" y="46" width="100" height="52" rx="5" />
+            <rect x="710" y="46" width="100" height="52" rx="5" />
+            <rect x="826" y="46" width="100" height="52" rx="5" />
+          </g>
+
+          <!-- completion highlight -->
+          <rect x="826" y="46" width="100" height="52" rx="5" class="ok-mark" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-opacity="0.6" />
+
+          <g stroke="currentColor" stroke-opacity="0.45" stroke-width="1.4" marker-end="url(#ar2)">
+            <line x1="114" y1="72" x2="126" y2="72" />
+            <line x1="230" y1="72" x2="242" y2="72" />
+            <line x1="346" y1="72" x2="358" y2="72" />
+            <line x1="462" y1="72" x2="474" y2="72" />
+            <line x1="578" y1="72" x2="590" y2="72" />
+            <line x1="694" y1="72" x2="706" y2="72" />
+            <line x1="810" y1="72" x2="822" y2="72" />
+          </g>
+
+          <g font-family="'Noto Sans SC', sans-serif" font-size="13.5" fill="currentColor" text-anchor="middle">
+            <text x="64"  y="78">空闲</text>
+            <text x="180" y="78">准备</text>
+            <text x="296" y="78">录音</text>
+            <text x="412" y="78">转写</text>
+            <text x="528" y="78">规范化</text>
+            <text x="644" y="78">润色</text>
+            <text x="760" y="78">插入</text>
+            <text x="876" y="78" class="ok-mark" fill="currentColor">完成</text>
+          </g>
+
+          <!-- abort bus -->
+          <path d="M 180 98 L 180 140 L 760 140 L 760 98" fill="none" class="abort-mark" stroke="currentColor" stroke-opacity="0.55" stroke-width="1.4" stroke-dasharray="5 4" />
+          <path d="M 470 140 L 470 186" fill="none" class="abort-mark" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar2-abort)" />
+          <text x="478" y="132" font-family="'Noto Sans SC', sans-serif" font-size="12" class="abort-mark" fill="currentColor">进行中的任一阶段都可以取消 / 失败</text>
+
+          <rect x="370" y="186" width="200" height="48" rx="5" class="abort-mark" fill="currentColor" fill-opacity="0.1" stroke="currentColor" stroke-opacity="0.55" />
+          <text x="470" y="216" font-family="'Noto Sans SC', sans-serif" font-size="13.5" fill="currentColor" text-anchor="middle">取消 / 失败</text>
+
+          <!-- return path -->
+          <path d="M 876 98 L 876 250 L 64 250 L 64 102" fill="none" stroke="currentColor" stroke-opacity="0.4" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar2)" />
+          <path d="M 470 234 L 470 250" fill="none" stroke="currentColor" stroke-opacity="0.4" stroke-width="1.4" />
+          <text x="470" y="272" font-family="'Noto Sans SC', sans-serif" font-size="12" fill="currentColor" fill-opacity="0.7" text-anchor="middle">关掉 → 空闲     再按一次 → 直接开始新会话</text>
+        </svg>
+      </div>
+      <figcaption>
+        推进只能通过协调器里唯一的那个函数发生。它同时检查三件事：任务有没有被取消、
+        这次会话是不是已经被顶替、这一步转换在表里合不合法。三件事都过了才改状态。
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="topic">契约</span>十二个端口</h2>
+    <div class="prose">
+      <p>
+        端口就是「我需要这个能力」的声明。它们都很窄 —— 没有一个是
+        <code>Manager</code> 或 <code>Service</code> 那种什么都装的对象，
+        每个只做一件能被完整描述的事。
+      </p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <caption>后四个是为了让内核不碰全局状态而单独提出来的，原本的架构文档里没有。</caption>
+        <thead>
+          <tr><th>端口</th><th>负责</th><th>需要注意的地方</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="name">AudioCapturing</td><td>麦克风生命周期</td><td>多一个 <code>prepare()</code>：先把设备热起来，别让第一个字等开机时间</td></tr>
+          <tr><td class="name">VoiceActivityDetecting</td><td>裁掉静音、拒绝空录音</td><td>返回的是<strong>帧区间</strong>，不是第二份音频</td></tr>
+          <tr><td class="name">SpeechRecognizing</td><td>批量语音识别</td><td>长音频内部可以分块，但对外只交一个结果</td></tr>
+          <tr><td class="name">DeterministicTextProcessing</td><td>不用模型的文字清理</td><td>永远执行；收得到模式，因为标点和分点方式跟模式有关</td></tr>
+          <tr><td class="name">TextRefining</td><td>本地模型书面化</td><td>交回来的是<strong>未经验证</strong>的文本</td></tr>
+          <tr><td class="name">RefinementOutputGuard</td><td>判断润色结果能不能用</td><td>不是端口，是核心里一个具体类型 —— 见下</td></tr>
+          <tr><td class="name">TextInserting</td><td>把文字送进目标应用</td><td><strong>永不抛错</strong>，投递结果用结构化的值表达</td></tr>
+          <tr><td class="name">ActiveApplicationProviding</td><td>抓取前台应用与插入目标</td><td><strong>永不抛错</strong>：没有权限也不该中断录音</td></tr>
+          <tr><td class="name">ModeResolving</td><td>决定这次用哪个模式</td><td>同步纯函数，好在焦点变化之前就定下来</td></tr>
+          <tr><td class="name">HistoryStoring</td><td>最近十条记录</td><td>写失败不影响这次听写</td></tr>
+          <tr><td class="name">MetricsRecording</td><td>隐私安全的指标</td><td>只有计数、耗时、类别，没有文本</td></tr>
+          <tr><td class="name">DictationSettingsProviding</td><td>语种、默认模式、润色开关</td><td>内核不许读 <code>UserDefaults</code>，所以设成端口</td></tr>
+          <tr><td class="name">TimeSource</td><td>当前时间</td><td>同时给墙钟和单调时钟，阶段耗时才能精确断言</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <p>
+        <strong>为什么输出守卫不是端口。</strong>
+        如果它是端口，任何一个组装处 —— 包括预览用的假程序集 —— 都能塞进去一个更宽松的版本。
+        那和「让模型自己给自己的输出打分」是同一个漏洞，只是从另一头进来的。
+      </p>
+      <p>
+        所以它是一个具体的核心类型，只有阈值可以通过 <code>RefinementGuardPolicy</code> 注入，
+        而且阈值按模式分开：结构化模式本来就该比输入长，消息模式不该。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="topic">机制</span>协调器里三个想清楚了的决定</h2>
+
+    <ol class="steps">
+      <li>
+        <div>
+          <h3><code>handle()</code> 是同步的</h3>
+          <p class="lead-in">
+            它只改状态、然后立刻返回；整条流水线跑在自己的 Task 里。
+            这样「取消」能落在一次正在进行的识别中间，而不是傻等它跑完。
+          </p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>停止信号用 <code>AsyncStream</code>，没有自己写门</h3>
+          <p class="lead-in">
+            它天然带闩锁语义（在「准备」阶段就按下的第二次会被缓存，等到地方了立刻生效）、
+            天然感知取消、而且 <code>yield</code> 是同步的。所以 <code>handle()</code> 一个 <code>await</code> 都不需要。
+          </p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>推进只有一个入口</h3>
+          <p class="lead-in">
+            每个阶段切换都走同一个函数。它一次做完三件检查。
+            这让「迟到的适配器不能污染新会话」变成结构性的保证，而不是每个调用点都要记得写的纪律。
+          </p>
+        </div>
+      </li>
+    </ol>
+
+    <div class="tablewrap">
+      <table>
+        <caption>取消要同时用两种手段，因为谁都不能替代谁。</caption>
+        <thead>
+          <tr><th>手段</th><th>能唤醒停在录音等待的会话</th><th>能中断正在跑的适配器调用</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="name">结束停止信号</td><td>能</td><td>不能</td></tr>
+          <tr><td class="name">取消 Task</td><td>不能 —— 被取消的任务不会自动唤醒停在 continuation 上的等待</td><td>能</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <pre><code><span class="cmt">// 顺序是有讲究的：先放行停在等待上的，再中断在跑的。</span>
+private func cancelActiveSession() {
+    guard let session = active else { return }
+    stopSignal?.finish()      <span class="cmt">// 唤醒停在录音等待的会话</span>
+    session.task.cancel()     <span class="cmt">// 中断正在跑的适配器调用</span>
+}</code></pre>
+  </section>
+
+  <section>
+    <h2><span class="topic">失败</span>每一条退路都指向同一个前提</h2>
+    <div class="prose">
+      <p>
+        八个端口都可能出问题，处理方式各不相同，但有一条规则贯穿全部：
+        <strong>原始文本一旦产生，就没有任何一条路径能丢掉它。</strong>
+      </p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>哪一步出问题</th><th>协调器怎么做</th><th>用户说的话还在吗</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>检测不到语音</td><td>会话失败，可重试</td><td>本来就没有内容</td></tr>
+          <tr><td>静音裁剪报错</td><td>用未裁剪的整段继续，记录一次降级</td><td class="ok">在</td></tr>
+          <tr><td>识别失败</td><td>会话失败，带上类别和阶段</td><td>没有文本</td></tr>
+          <tr><td>确定性处理失败</td><td>把原始文本当作规范化结果，继续走</td><td class="ok">在</td></tr>
+          <tr><td>润色超时 / 报错</td><td>最终文本 = 规范化文本，记录原因</td><td class="ok">在</td></tr>
+          <tr><td>守卫拒绝润色结果</td><td>同上 —— 空输出、长度越界、语言损坏、混入思考痕迹都会走到这</td><td class="ok">在</td></tr>
+          <tr><td>插入失败</td><td>会话仍然算完成，文字留在剪贴板可复制</td><td class="ok">在</td></tr>
+          <tr><td>写历史失败</td><td>只报告给指标，这次听写不受影响</td><td class="ok">在</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout is-abort">
+      <p>
+        <strong>一条容易被忽略的规则：</strong>只要文字交给了插入端口，这次会话就会写进历史 ——
+        哪怕它是被取消的。因为文字可能已经进了用户的文档，而那条历史记录是唯一的凭据。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="topic">测试</span>怎么在没有麦克风的机器上测完整流程</h2>
+    <div class="prose">
+      <p>
+        十二个端口全部换成假实现，时钟也是注入的 —— 假时钟每被读一次就前进 250 毫秒，
+        所以阶段耗时是精确的、可以写成断言的值，不需要真的等。
+      </p>
+      <p>
+        真正让复杂用例可测的是 <code>Latch</code>：它能让某个端口调用停在原地，
+        测试先去做别的事，再决定什么时候放行。取消和「迟到的结果」这两类最难测的情况，
+        靠的都是它，而且没有一个 <code>sleep</code>。
+      </p>
+    </div>
+
+    <figure>
+      <div class="figscroll">
+        <svg viewBox="0 0 900 250" role="img" aria-label="一次取消的时序：测试按两次快捷键，假适配器停在 Latch 上，测试发出取消，停止信号结束且任务被取消，闩锁打开，适配器返回一个正常结果，但推进点发现任务已取消，于是丢弃结果并进入取消态。">
+          <defs>
+            <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <polygon points="0,1 10,5 0,9" fill="currentColor" />
+            </marker>
+          </defs>
+
+          <!-- lanes -->
+          <g font-family="'Noto Sans SC', sans-serif" font-size="13" fill="currentColor">
+            <text x="14" y="32">测试</text>
+            <text x="14" y="112">假适配器</text>
+            <text x="14" y="192">协调器</text>
+          </g>
+          <g stroke="currentColor" stroke-opacity="0.2" stroke-dasharray="4 5">
+            <line x1="118" y1="26" x2="118" y2="222" />
+            <line x1="430" y1="26" x2="430" y2="222" />
+            <line x1="700" y1="26" x2="700" y2="222" />
+          </g>
+
+          <!-- arrows -->
+          <g stroke="currentColor" stroke-opacity="0.55" stroke-width="1.4" marker-end="url(#ar3)">
+            <line x1="122" y1="44" x2="696" y2="44" />
+            <line x1="696" y1="76" x2="434" y2="76" />
+            <line x1="122" y1="108" x2="696" y2="108" />
+            <line x1="696" y1="140" x2="434" y2="140" />
+            <line x1="434" y1="172" x2="696" y2="172" />
+            <line x1="696" y1="204" x2="122" y2="204" />
+          </g>
+
+          <g font-family="'Noto Sans SC', sans-serif" font-size="11.5" fill="currentColor" fill-opacity="0.85">
+            <text x="130" y="38">按两次快捷键</text>
+            <text x="440" y="70">识别请求</text>
+            <text x="130" y="102">取消</text>
+            <text x="440" y="134">闩锁打开 → 返回一个正常结果（它无视了取消）</text>
+            <text x="440" y="166">推进点发现任务已取消 → 丢弃这个结果</text>
+            <text x="130" y="198">收到「已取消」</text>
+          </g>
+
+          <!-- parked marker -->
+          <rect x="424" y="82" width="12" height="18" rx="2" class="abort-mark" fill="currentColor" fill-opacity="0.85" />
+          <text x="414" y="96" font-family="'Noto Sans SC', sans-serif" font-size="11.5" class="abort-mark" fill="currentColor" text-anchor="end">停在 Latch</text>
+        </svg>
+      </div>
+      <figcaption>
+        这张图是「迟到的适配器」测试所验证的东西。适配器完全不配合 —— 它没看取消标志，返回了一个很漂亮的结果。
+        但推进点是唯一的出口，它拒绝了这次推进，流水线从这里展开回取消态。
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="topic">过程</span>测试抓出来的五个真问题</h2>
+    <div class="prose">
+      <p>
+        这些都不是测试本身的毛病，是实现里的缺陷。列在这里是因为它们说明了这批测试到底在测什么。
+      </p>
+    </div>
+
+    <div class="bugs">
+      <div class="bug">
+        <h3>插入过程中的取消被悄悄吞掉了</h3>
+        <p class="symptom"><b>现象</b>在「插入」这一步取消，会话报的是成功。参数化测试里只有这一个边界挂了。</p>
+        <p class="fix"><b>修法</b>插入端口按契约永不抛错，所以它没法报告自己被取消了。在调用之后补一次显式的取消检查。这正是取消测试要按十个边界逐个跑、而不是手写一两个的原因。</p>
+      </div>
+      <div class="bug">
+        <h3>状态流把中间阶段丢了</h3>
+        <p class="symptom"><b>现象</b>订阅者看到的阶段序列是「转写 → 润色」，中间的「规范化」不见了。</p>
+        <p class="fix"><b>修法</b>流的缓冲策略本来设成「只留最新一条」。对渲染够用，但让阶段序列变得不可观测。会话总共只产生十来个小快照，没有理由丢，改成不丢。</p>
+      </div>
+      <div class="bug">
+        <h3>准备阶段多读了一次时钟</h3>
+        <p class="symptom"><b>现象</b>六个阶段的耗时断言里，只有「准备」这一个对不上。</p>
+        <p class="fix"><b>修法</b>上下文里的开始时间另读了一次时钟，而这个时间本来就是按快捷键那一刻。把它改成复用同一个读数，每个阶段边界就正好读一次。</p>
+      </div>
+      <div class="bug">
+        <h3>守卫报错了原因</h3>
+        <p class="symptom"><b>现象</b>混入 <code>&lt;thinking&gt;</code> 的输出被拒绝了，但给的理由是「长度越界」。</p>
+        <p class="fix"><b>修法</b>长度检查排在形状检查前面。而泄漏出来的思考痕迹几乎总是比输入长得多，所以永远先撞上长度这一条。把形状检查提前，才拿得到能用来定位的原因。</p>
+      </div>
+      <div class="bug">
+        <h3>取消时没有放开麦克风</h3>
+        <p class="symptom"><b>现象</b>写假实现时发现的：会话取消了，但没有任何代码去释放采集设备。</p>
+        <p class="fix"><b>修法</b>规则定为「没有产出音频片段就释放设备」。取消发生在录音期间时正好符合；正常停止过的会话则不必多此一举。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="topic">偏差</span>和原计划不一样的三处</h2>
+    <div class="prose">
+      <p>计划是先定好的，写的时候发现其中三处站不住，改了。</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>原计划</th><th>实际</th><th>为什么</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>用 <code>RefinementPolicy</code> 这个枚举表达「润色开或关」</td>
+            <td>拆成 <code>mode</code> 和 <code>isRefinementEnabled</code> 两个字段</td>
+            <td>确定性处理也要知道模式 —— 标点和分点方式跟模式有关。而「关掉润色」这个分支里塞不下模式，枚举就少了一半信息。</td>
+          </tr>
+          <tr>
+            <td>自己写一个 <code>AsyncGate</code> 和一个广播器</td>
+            <td>两个都不需要</td>
+            <td><code>AsyncStream</code> 已经给了闩锁语义、取消感知和同步的 <code>yield</code>；订阅者登记直接放在协调器自己身上，发布就是同步的，顺序不会倒。</td>
+          </tr>
+          <tr>
+            <td>只有正常完成的会话才写历史</td>
+            <td>只要文字交给了插入端口就写</td>
+            <td>在插入过程中被取消的会话，文字可能已经落到用户文档里了。这时候历史记录是唯一的凭据，不写反而更不安全。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="topic">代码</span>从哪读起</h2>
+    <div class="prose">
+      <p>
+        全部在 <code>Packages/LocalASRKit/Sources/DictationCore/</code>。建议按这个顺序看。
+      </p>
+    </div>
+
+    <div class="filemap">
+      <div><div class="path">Values/DictationPhase.swift</div><div class="what">十个阶段和那张转换表，最小的一个文件，也最能说明整个形状</div></div>
+      <div><div class="path">Values/SessionContext.swift</div><div class="what">会话开始时冻结下来的东西，以及为什么必须冻结</div></div>
+      <div><div class="path">Ports/TextInserting.swift</div><div class="what">最短的一个端口，注释解释了「永不抛错」这个约定</div></div>
+      <div><div class="path">Policy/RefinementOutputGuard.swift</div><div class="what">五项检查，以及为什么形状检查要排在长度检查前面</div></div>
+      <div><div class="path">Coordinator/DictationCoordinator.swift</div><div class="what">主文件。先看 <code>drive</code> 和 <code>finalize</code>，再看 <code>advance</code></div></div>
+      <div><div class="path">Tests/DictationCoreTests/Support/Latch.swift</div><div class="what">四十行，注释解释了三个必须保持的顺序，别改错</div></div>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      <strong>下一步是 Phase 2：菜单栏应用外壳。</strong>
+      内核留出的观察接口（<code>snapshots()</code>）就是给它用的 —— 应用模型渲染快照、转发语义动作，
+      不把流程策略搬进视图。
+    </p>
+    <p>
+      这些改动都在分支 <code>feat/phase1-core-contracts</code> 上，还没提交。
+      <code>main</code> 没有被动过。
+    </p>
+  </footer>
+
+</div>

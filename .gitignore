@@ -11,3 +11,6 @@ ModelAssets/*
 !ModelAssets/README.md
 !ModelAssets/manifest.json
 
+
+# Local evaluation corpora contain personal audio and transcripts.
+TestData/
