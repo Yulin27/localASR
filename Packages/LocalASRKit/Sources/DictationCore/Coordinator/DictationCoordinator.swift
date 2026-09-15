@@ -484,6 +484,14 @@ public actor DictationCoordinator {
                 language: run.context?.languageHint ?? .automatic
             )
         )
+        // Checked before the result is stored, not after. A recogniser that ignored the
+        // cancellation has produced a transcript the user asked not to have, and the
+        // terminal snapshot now outlives the cancellation — it must show what the session
+        // had when they gave up on it, not what arrived afterwards. Insertion is the one
+        // exception, and for the opposite reason: its outcome describes something that may
+        // already have happened to the user's document.
+        try ensureStillOwns(run, stage: .transcribing)
+
         run.recognitionEngine = recognition.engine
         run.transcript = Transcript(rawText: recognition.rawText)
         try ensureNotEmpty(recognition.rawText, stage: .transcribing)
@@ -606,21 +614,27 @@ public actor DictationCoordinator {
     /// Runs the deterministic pipeline, falling back to the raw text if it fails.
     private func normalize(_ rawText: String, run: inout SessionRun) async throws -> String {
         guard let context = run.context else { return rawText }
+        // Only the adapter call is guarded, so the ownership check below cannot be mistaken
+        // for the adapter failing and turned into a fallback.
+        let normalized: NormalizedText
         do {
-            let normalized = try await dependencies.textProcessing.process(
+            normalized = try await dependencies.textProcessing.process(
                 TextProcessingRequest(
                     sessionID: context.id,
                     rawText: rawText,
                     mode: context.mode
                 )
             )
-            return normalized.text
         } catch {
             try cancelledIfSessionWas(stage: .normalizing)
             // Never lose valid text: the raw text stands in as the deterministic result.
             run.fallbacks.append(.deterministicProcessingUnavailable)
             return rawText
         }
+
+        // A stage that ignored the cancellation does not get to contribute its result.
+        try ensureStillOwns(run, stage: .normalizing)
+        return normalized.text
     }
 
     /// Refines the deterministic text, falling back to it when the model is unusable.
@@ -635,23 +649,31 @@ public actor DictationCoordinator {
             mode: context.mode
         )
 
+        // Only the adapter call is guarded, so the ownership check below cannot be mistaken
+        // for the refiner failing and turned into a fallback.
+        let output: RefinementOutput
         do {
-            let output = try await dependencies.refiner.refine(request)
-            switch guardRail.evaluate(output, for: request) {
-            case .accepted(let text):
-                run.refinement = RefinementSummary(outcome: .refined(output.engine))
-                run.refinementEngine = output.engine
-                return text
-            case .rejected(let reason):
-                run.refinement = RefinementSummary(outcome: .rejected(reason))
-                run.fallbacks.append(reason)
-                return normalizedText
-            }
+            output = try await dependencies.refiner.refine(request)
         } catch {
             try cancelledIfSessionWas(stage: .refining)
             let timedOut = (error as? DictationFailure)?.category == .timeout
             let reason: FallbackReason = timedOut ? .refinementTimedOut : .refinementUnavailable
             run.refinement = RefinementSummary(outcome: .unavailable(reason))
+            run.fallbacks.append(reason)
+            return normalizedText
+        }
+
+        // A refiner that ignored the cancellation does not get to contribute its result, and
+        // the guard is not asked to judge one the session no longer wants.
+        try ensureStillOwns(run, stage: .refining)
+
+        switch guardRail.evaluate(output, for: request) {
+        case .accepted(let text):
+            run.refinement = RefinementSummary(outcome: .refined(output.engine))
+            run.refinementEngine = output.engine
+            return text
+        case .rejected(let reason):
+            run.refinement = RefinementSummary(outcome: .rejected(reason))
             run.fallbacks.append(reason)
             return normalizedText
         }

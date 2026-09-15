@@ -171,8 +171,14 @@ public struct RefinementOutputGuard: Sendable {
     /// Latin entries carry their trailing space, because a normalized opening separates
     /// words with one; Chinese is written without.
     private static let framingIntroductions = [
-        "here is the ", "here's the ", "this is the ", "以下是", "下面是", "这是",
+        "here is ", "here's ", "this is ", "以下是", "下面是", "这是",
     ]
+
+    /// The determiner between the introduction and the edit, where the language has one.
+    ///
+    /// Framing is as readily "here is a revised version" or "here is your corrected text" as
+    /// it is "the"; the empty string covers Chinese, and English without one.
+    private static let framingDeterminers = ["the ", "a ", "an ", "your ", "my ", ""]
     private static let framingEdits = [
         "cleaned up ", "cleaned ", "corrected ", "revised ", "polished ", "rewritten ",
         "edited ", "tidied ", "清理后的", "整理后的", "修改后的", "润色后的", "优化后的",
@@ -222,10 +228,15 @@ public struct RefinementOutputGuard: Sendable {
         }
         for introduction in framingIntroductions where head.hasPrefix(introduction) {
             let afterIntroduction = head.dropFirst(introduction.count)
-            for edit in framingEdits where afterIntroduction.hasPrefix(edit) {
-                let afterEdit = afterIntroduction.dropFirst(edit.count)
-                if framingArtifacts.contains(where: { afterEdit.hasPrefix($0) }) {
-                    return true
+            for determiner in framingDeterminers where afterIntroduction.hasPrefix(determiner) {
+                let afterDeterminer = afterIntroduction.dropFirst(determiner.count)
+                for edit in framingEdits where afterDeterminer.hasPrefix(edit) {
+                    // On a word boundary, or "the revised textbook chapter" would read as
+                    // framing because "textbook" begins with "text".
+                    let afterEdit = String(afterDeterminer.dropFirst(edit.count))
+                    if framingArtifacts.contains(where: { opensWith(afterEdit, $0) }) {
+                        return true
+                    }
                 }
             }
         }

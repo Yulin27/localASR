@@ -149,6 +149,8 @@ struct RefinementGuardTests {
         arguments: [
             ("here is my plan for tomorrow", "Here is the cleaned version: my plan for tomorrow."),
             ("here's my plan for tomorrow", "Here's the corrected text: my plan for tomorrow."),
+            ("here is my plan for tomorrow", "Here is a revised version: my plan for tomorrow."),
+            ("here is my plan for tomorrow", "Here is your corrected text: my plan for tomorrow."),
             ("以下是我明天的安排先确认范围", "以下是清理后的文本：我明天的安排，先确认范围。"),
             ("voici le document que tu m'as demandé", "Voici le texte corrigé : le document que tu m'as demandé."),
         ]
@@ -164,6 +166,8 @@ struct RefinementGuardTests {
         arguments: [
             ("here is the revised schedule for next week", "Here is the revised schedule for next week."),
             ("here is the corrected invoice total", "Here is the corrected invoice total."),
+            ("here is the revised textbook chapter", "Here is the revised textbook chapter."),
+            ("here is the updated versioning policy", "Here is the updated versioning policy."),
             ("以下是修改后的计划我们先确认范围", "以下是修改后的计划，我们先确认范围。"),
             ("voici le document corrigé que tu voulais", "Voici le document corrigé que tu voulais."),
         ]

@@ -232,6 +232,35 @@ struct CoordinatorStaleResultTests {
         #expect(await harness.currentSnapshot().sessionID == second)
     }
 
+    @Test("A transcript produced after a cancellation never reaches the user")
+    func lateTranscriptDoesNotReachTheCancelledSnapshot() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+
+        // The recogniser runs on past the cancellation and returns a perfectly good result.
+        let recognition = Gate()
+        await harness.recognizer.setGate(recognition)
+        defer { Task { await recognition.open() } }
+
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("recognition was entered") {
+            await harness.recognizer.callCount == 1
+        }
+
+        await harness.coordinator.handle(.cancel)
+        await recognition.open()
+        try await harness.waitForCleanup()
+
+        // The terminal snapshot outlives the cancellation now, so it has to show what the
+        // session had when the user gave up on it — not words that arrived afterwards.
+        let terminal = await harness.currentSnapshot()
+        #expect(terminal.phase == .cancelled)
+        #expect(terminal.transcript == .empty)
+        #expect(harness.metrics.last?.rawCharacterCount == nil)
+        #expect(await harness.processor.callCount == 0)
+    }
+
     @Test("A clip is discarded exactly once even when its session is abandoned")
     func abandonedClipIsDiscarded() async throws {
         let harness = DictationHarness()
