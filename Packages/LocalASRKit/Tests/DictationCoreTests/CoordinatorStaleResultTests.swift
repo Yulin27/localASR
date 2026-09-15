@@ -195,6 +195,44 @@ struct CoordinatorStaleResultTests {
         #expect(await harness.capture.events == [.prepare, .start, .stop, .prepare, .start])
     }
 
+    @Test("A session cancelled while waiting for the microphone stops waiting")
+    func cancelledWaiterDoesNotQueueBehindTheNextRecording() async throws {
+        let harness = DictationHarness()
+        await harness.allowAll()
+
+        // The first session holds the device inside a `start()` that ignores cancellation.
+        let startCall = Gate()
+        await harness.capture.setStartGate(startCall)
+        defer { Task { await startCall.open() } }
+
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("capture.start was entered") {
+            await harness.capture.events.contains(.start)
+        }
+        await harness.coordinator.handle(.cancel)
+
+        // A second session starts and parks waiting for that device, then is cancelled too.
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("the second session captured its destination") {
+            await harness.targetProvider.callCount == 2
+        }
+        await harness.coordinator.handle(.cancel)
+
+        // It must unwind now, on its own cancellation. Queueing behind the microphone would
+        // leave it holding its cleanup and its metrics until whoever records next stops —
+        // which is up to the user, and may be never.
+        try await harness.waitForCleanup()
+        #expect(harness.metrics.last?.outcome == .cancelled)
+        // The first session is still inside `start()`, so this can only be the second.
+        #expect(harness.metrics.all.count == 1)
+
+        // A third session waits properly, and gets the device once the first lets go.
+        await harness.coordinator.handle(.toggleRecording)
+        #expect(await harness.expectNeverReaches(.recording))
+        await startCall.open()
+        _ = try await harness.waitForPhase(.recording)
+    }
+
     @Test("A session still cleaning up does not stop the user from dictating again")
     func slowCleanupDoesNotBlockTheNextSession() async throws {
         let harness = DictationHarness()

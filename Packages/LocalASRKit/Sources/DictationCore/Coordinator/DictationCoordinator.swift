@@ -220,6 +220,9 @@ public actor DictationCoordinator {
         active = nil
         stopSignal?.finish()
         stopSignal = nil
+        // Nothing may start now, so anything still waiting for the microphone is waiting
+        // for a turn it will never take.
+        wakeCaptureWaiters()
         snapshot = .idle
         for continuation in subscribers.values {
             continuation.finish()
@@ -272,9 +275,12 @@ public actor DictationCoordinator {
     /// microphone.
     ///
     /// Looped rather than checked once: a resumed waiter claims the device in a later actor
-    /// step, so a second waiter resumed alongside it must wait again.
-    private func awaitCaptureHandover() async {
-        while captureOwner != nil {
+    /// step, so a second waiter resumed alongside it must wait again. It stops waiting the
+    /// moment this run is no longer the session the coordinator owns — a run that has been
+    /// cancelled must never queue behind the recording that replaced it, because it would
+    /// then not finish unwinding until the user stopped that recording, if ever.
+    private func awaitCaptureHandover(for run: SessionRun) async {
+        while captureOwner != nil, active?.generation == run.generation {
             await withCheckedContinuation { continuation in
                 captureWaiters.append(continuation)
             }
@@ -285,6 +291,15 @@ public actor DictationCoordinator {
     private func releaseCaptureOwnership(_ generation: UInt64) {
         guard captureOwner == generation else { return }
         captureOwner = nil
+        wakeCaptureWaiters()
+    }
+
+    /// Wakes everything waiting for the microphone, to let each re-decide.
+    ///
+    /// Each waiter re-checks on waking: the one that still owns the session waits again if
+    /// the device is not free yet, and one that has been cancelled stops waiting for a
+    /// device it is never going to use and gets on with unwinding.
+    private func wakeCaptureWaiters() {
         let waiting = captureWaiters
         captureWaiters.removeAll()
         for continuation in waiting {
@@ -353,6 +368,11 @@ public actor DictationCoordinator {
 
         active = nil
         stopSignal = nil
+
+        // A session cancelled while waiting for the microphone is woken now rather than
+        // when the device frees up. It is never going to use it, and leaving it parked
+        // would hold back its cleanup and its metrics behind whatever happens next.
+        wakeCaptureWaiters()
 
         // Moved rather than rebuilt when the session has been published: one cancelled during
         // refinement has already produced deterministic text, and the terminal snapshot is
@@ -441,7 +461,7 @@ public actor DictationCoordinator {
         // session was cancelled. Waiting here is what keeps a late `stop()` or `cancel()`
         // from ending the recording started below. The wait ends as soon as that session is
         // finished with the device, not when the rest of its cleanup is.
-        await awaitCaptureHandover()
+        await awaitCaptureHandover(for: run)
         try ensureStillOwns(run, stage: .preparing)
 
         captureOwner = run.generation
