@@ -63,14 +63,21 @@ call on a long recording can take tens of seconds to return. Waiting for it woul
 watching `transcribing`, with the next activation landing in the ignored processing branch and no
 way to start dictating again.
 
-The abandoned run keeps only its cleanup. It no longer owns the published state, so it releases the
-device, discards the clip, writes any history the session earned, and records its metrics without
-publishing anything. This is why a run tracks its own phase separately from the published snapshot:
-the snapshot is a projection for the UI, and after a cancellation the two legitimately disagree.
+The abandoned run keeps only its cleanup. It releases the device, discards the clip, writes any
+history the session earned, and records its metrics. It publishes no further phase — the session is
+already terminal — but it does refresh that terminal snapshot when the cleanup learns something the
+user still needs: how the insertion that was in flight actually ended, or that the history write was
+lost. The refresh keeps the same phase and the same session, and is skipped when a newer session
+exists, so it can never reach a session's pre-freeze window or overwrite a newer terminal state.
 
-A consequence worth stating plainly: a terminal snapshot no longer proves the run behind it has
-finished unwinding. Metrics are recorded once, at the end of that cleanup, and are the signal that
-it has.
+This is why a run tracks its own phase separately from the published snapshot: the snapshot is a
+projection for the UI, and after a cancellation the two legitimately disagree.
+
+Two consequences worth stating plainly. A terminal snapshot no longer proves the run behind it has
+finished unwinding; metrics are recorded once, at the end of that cleanup, and are the signal that
+it has. And the session's last stage is measured to the moment the user cancelled, not to the moment
+the adapter returned, so an adapter that ignores cancellation cannot inflate the latency figures the
+stage timings exist to measure.
 
 ### 5. The mode is resolved from the frontmost application, not from the destination
 

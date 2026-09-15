@@ -135,6 +135,14 @@ public actor DictationCoordinator {
     /// Sessions waiting for ``captureOwner`` to clear.
     private var captureWaiters: [CheckedContinuation<Void, Never>] = []
 
+    /// When the user cancelled, and which generation they cancelled.
+    ///
+    /// A cancelled session ends the moment they ask. An adapter that ignores cancellation can
+    /// keep running for tens of seconds after that, and reading the clock when it finally
+    /// returns would bill all of it to the stage the user was in — inflating the very latency
+    /// the stage timings exist to measure.
+    private var cancellation: (generation: UInt64, at: Timestamp)?
+
     public init(
         dependencies: Dependencies,
         sessionIDs: SessionIDGenerator = .random,
@@ -319,6 +327,9 @@ public actor DictationCoordinator {
         stopSignal?.finish()
         session.task.cancel()
 
+        // Read now, while the user is asking, rather than when the driver unwinds.
+        cancellation = (session.generation, dependencies.time.now())
+
         // The coordinator gives the session up here rather than when its driver finally
         // returns. Cancelling a task does not stop an adapter that never checks for it, and a
         // recognition call on a long recording can take tens of seconds to come back — until
@@ -327,7 +338,9 @@ public actor DictationCoordinator {
         //
         // The abandoned run keeps only its cleanup. It no longer owns the published state, so
         // `finalize` releases the device, discards the clip, writes any history the session
-        // earned and records its metrics, without publishing anything.
+        // earned and records its metrics. It publishes no further phase — though it does
+        // refresh this terminal snapshot if the cleanup learns something the user still needs,
+        // such as how the insertion that was in flight actually ended.
         //
         // The microphone needs nothing here. `captureOwner` already records whether this run
         // is holding it, and the run gives it up itself — as soon as `stop()` hands over a
@@ -671,8 +684,13 @@ public actor DictationCoordinator {
         return next
     }
 
-    private func closeTiming(for phase: DictationPhase, run: inout SessionRun) {
-        let now = dependencies.time.now()
+    /// Closes `phase`'s stage timing, at `at` when the moment is already known.
+    ///
+    /// The clock is read here for every ordinary boundary. A cancellation is the exception:
+    /// its moment was recorded when the user asked, and the wait for an adapter that ignored
+    /// them is not part of the stage they were in.
+    private func closeTiming(for phase: DictationPhase, run: inout SessionRun, at: Timestamp? = nil) {
+        let now = at ?? dependencies.time.now()
         run.timings.append(
             StageTiming(phase: phase, duration: now.elapsed(since: run.phaseEnteredAt))
         )
@@ -726,11 +744,18 @@ public actor DictationCoordinator {
             stopSignal = nil
         }
 
+        // Taken now, before anything suspends. The session ended when the user asked, and the
+        // last stage is measured to that moment rather than to whenever the adapter returned.
+        let cancelledAt = cancellation?.generation == run.generation ? cancellation?.at : nil
+        if cancelledAt != nil {
+            cancellation = nil
+        }
+
         let terminal = run.terminalPhase
         let reachedTerminal = run.phase.canTransition(to: terminal)
         if reachedTerminal {
             let previous = run.phase
-            closeTiming(for: previous, run: &run)
+            closeTiming(for: previous, run: &run, at: cancelledAt)
             if terminal == .failed, run.failure == nil {
                 run.failure = DictationFailure(
                     stage: previous,

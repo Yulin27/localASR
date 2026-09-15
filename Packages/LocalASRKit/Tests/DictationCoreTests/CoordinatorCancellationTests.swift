@@ -149,6 +149,36 @@ struct CoordinatorCancellationTests {
         #expect(await harness.clip.discardCount == 0)
     }
 
+    @Test("A cancelled stage is measured to the cancellation, not to the adapter's return")
+    func cancelledStageIsMeasuredToTheCancellation() async throws {
+        let harness = DictationHarness()
+        await harness.parkOnly(.recognition)
+
+        try await harness.startRecording()
+        await harness.coordinator.handle(.toggleRecording)
+        try await harness.waitUntil("recognition was entered") {
+            await harness.recognizer.callCount == 1
+        }
+
+        await harness.coordinator.handle(.cancel)
+
+        // The adapter keeps running long after the user gave up: time passes, and none of it
+        // is time they spent waiting for a session they had already cancelled.
+        for _ in 0..<20 {
+            _ = harness.time.now()
+        }
+        await harness.releaseAll()
+        try await harness.waitForCleanup()
+
+        let metrics = try #require(harness.metrics.last)
+        let transcribing = try #require(metrics.timings.last)
+        #expect(metrics.outcome == .cancelled)
+        #expect(transcribing.phase == .transcribing)
+        // One tick: entering `transcribing`, then the cancellation. Billing the overrun here
+        // would make a stage that the user experienced as instant look like a stall.
+        #expect(transcribing.duration == FakeTimeSource.step)
+    }
+
     @Test("Cancelling twice is idempotent")
     func cancelIsIdempotent() async throws {
         let harness = DictationHarness()
