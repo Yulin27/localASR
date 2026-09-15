@@ -42,8 +42,25 @@ def guide_paths() -> list[Path]:
             continue
         if relative.parts[0] in EXCLUDED_TOP_LEVEL:
             continue
+        if inside_nested_checkout(path):
+            continue
         found.append(path)
     return sorted(found, key=lambda p: p.relative_to(REPO_ROOT).as_posix())
+
+
+def inside_nested_checkout(path: Path) -> bool:
+    """Whether `path` belongs to a nested repository or worktree rather than this one.
+
+    A linked worktree checked out below the root, such as `.pi-flow/worktrees/<name>`, has
+    its own guides on its own branch. Mirroring them from here would rewrite that branch's
+    files with banners naming the wrong source.
+    """
+    directory = path.parent
+    while directory != REPO_ROOT:
+        if (directory / ".git").exists():
+            return True
+        directory = directory.parent
+    return False
 
 
 def rendered(source: Path) -> str:
